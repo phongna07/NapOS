@@ -1,0 +1,15 @@
+- [ ] github action
+- [ ] versioning and branching
+- [ ] Change background
+- [ ] Change logo
+- [ ] Change GRUB boot name (currently Linux Mint)
+- [ ] fcitx5-lotus
+- [ ] Chrome
+- [ ] Remove firefox
+- [ ] Remove libreoffice
+- [ ] OBS Studio
+- [ ] Zalo appimage
+- [ ] OnlyOffice
+- [ ] zsh shell
+- [ ] clipboard history
+- [ ] OTA update
