@@ -1,0 +1,9 @@
+/cache/
+/work/
+/dist/
+/inputs/
+*.iso
+*.iso.part
+*.log
+*.sha256
+*.build-info.json

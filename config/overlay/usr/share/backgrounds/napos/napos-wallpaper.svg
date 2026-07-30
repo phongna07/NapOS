@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071525"/>
+      <stop offset="0.5" stop-color="#12345a"/>
+      <stop offset="1" stop-color="#197e8c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#58e0d3" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#58e0d3" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="3840" height="2160" fill="url(#background)"/>
+  <rect width="3840" height="2160" fill="url(#glow)"/>
+  <g transform="translate(1920 1080)" text-anchor="middle">
+    <path d="M-210,-220 L0,-340 L210,-220 L210,20 L0,140 L-210,20 Z" fill="none" stroke="#7ff6e8" stroke-width="22"/>
+    <path d="M-105,5 L-105,-150 L20,-150 C130,-150 145,-10 55,30 L155,165 L45,165 L-45,45 L-45,165 L-105,165 Z" fill="#f5fffd" opacity="0.96"/>
+    <text x="0" y="330" fill="#f5fffd" font-family="sans-serif" font-size="150" font-weight="600" letter-spacing="10">NapOS</text>
+    <text x="0" y="420" fill="#a8d8dd" font-family="sans-serif" font-size="42" letter-spacing="7">CLEAR · CAPABLE · YOURS</text>
+  </g>
+</svg>

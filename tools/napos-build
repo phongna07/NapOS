@@ -1,0 +1,832 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
+ACTIVE_BUILD=0
+ACTIVE_CHILD_PID=0
+TEMP_PATHS=()
+BUILD_STARTED_AT=0
+BUILT_ISO=""
+DOCTOR_FAILURES=0
+
+cleanup_temp_paths() {
+    local path
+    for path in "${TEMP_PATHS[@]:-}"; do
+        [[ -n "$path" && -e "$path" ]] || continue
+        if [[ "$path" == "${TMPDIR:-/tmp}"/napos.* ]]; then
+            rm -rf -- "$path" 2>/dev/null || true
+        fi
+    done
+}
+
+on_exit() {
+    local status=$?
+    if (( ACTIVE_BUILD == 1 )); then
+        cleanup_mounts "$ROOTFS"
+    fi
+    cleanup_temp_paths
+    if (( status != 0 )); then
+        warn "Command failed with status $status. Disposable work state was preserved for inspection."
+    fi
+    return "$status"
+}
+
+on_signal() {
+    local signal_name=$1
+    trap - INT TERM
+    if (( ACTIVE_CHILD_PID > 0 )); then
+        kill "$ACTIVE_CHILD_PID" 2>/dev/null || true
+        wait "$ACTIVE_CHILD_PID" 2>/dev/null || true
+        ACTIVE_CHILD_PID=0
+    fi
+    warn "Received $signal_name; stopping the active workflow command."
+    exit 130
+}
+trap on_exit EXIT
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
+
+usage() {
+    cat <<'EOF'
+NapOS automated Linux Mint ISO-remaster workflow
+
+Usage:
+  tools/napos-build help
+  tools/napos-build doctor
+  tools/napos-build fetch
+  tools/napos-build build dev
+  tools/napos-build build release
+  tools/napos-build verify [ISO]
+  tools/napos-build inspect [ISO]
+  tools/napos-build clean-work
+  tools/napos-build clean-cache
+
+Preferred interface:
+  make doctor   Validate WSL2, tools, storage, sudo, and mounts
+  make fetch    Authenticate and cache Linux Mint 22.3 Cinnamon
+  make dev      Build and verify an LZ4 development ISO
+  make release  Build and verify an XZ release ISO
+  make verify ISO=dist/NapOS-...iso
+  make inspect ISO=dist/NapOS-...iso
+  make test     Run non-networked safety and branding checks
+
+Generated files are written below dist/. Builds are not byte-reproducible
+because package versions are resolved from live Mint and Ubuntu repositories.
+
+Development artifacts:
+  dist/NapOS-0.1.0-dev-cinnamon-amd64.iso
+  dist/NapOS-0.1.0-dev-cinnamon-amd64.iso.sha256
+  dist/NapOS-0.1.0-dev-cinnamon-amd64.build-info.json
+  dist/build-dev.log
+
+Release artifacts use the same names without the -dev suffix.
+EOF
+}
+
+doctor_check() {
+    local description=$1
+    shift
+    if "$@"; then
+        ok "$description"
+        return 0
+    else
+        printf '%s[FAILED]%s %s\n' "$COLOR_RED" "$COLOR_RESET" "$description" >&2
+        DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+        return 0
+    fi
+}
+
+doctor_failure() { doctor_check "$1" false; }
+
+check_wsl2() {
+    grep -qi 'microsoft-standard-WSL2' /proc/sys/kernel/osrelease
+}
+
+check_native_filesystem() {
+    local type
+    [[ "$PROJECT_ROOT" != /mnt/* ]] || return 1
+    type=$(stat -f -c '%T' "$PROJECT_ROOT")
+    [[ "$type" != "9p" && "$type" != "cifs" && "$type" != "fuseblk" ]]
+}
+
+check_disk_space() {
+    local available_kib required_kib
+    available_kib=$(df -Pk "$PROJECT_ROOT" | awk 'NR==2 {print $4}')
+    required_kib=$((MIN_FREE_GIB * 1024 * 1024))
+    (( available_kib >= required_kib ))
+}
+
+check_tools() {
+    local command
+    local commands=(awk bash chroot cmp curl cut df diff du file find findmnt flock git gpg head jq make md5sum mktemp mount mountpoint mksquashfs mv readlink realpath rm rsync sed sha256sum shellcheck sort stat sudo sync tee unsquashfs xargs xorriso)
+    for command in "${commands[@]}"; do
+        command -v "$command" >/dev/null 2>&1 || {
+            warn "Missing command: $command"
+            return 1
+        }
+    done
+}
+
+check_mount_capability() {
+    local test_dir
+    local status=0
+    test_dir=$(with_temp_dir)
+    TEMP_PATHS+=("$test_dir")
+    mkdir -p "$test_dir/source" "$test_dir/bind" "$test_dir/proc"
+    sudo mount --bind "$test_dir/source" "$test_dir/bind" >/dev/null 2>&1 || status=1
+    if (( status == 0 )); then
+        sudo mount -t proc proc "$test_dir/proc" >/dev/null 2>&1 || status=1
+    fi
+    if mountpoint -q "$test_dir/proc"; then
+        sudo umount "$test_dir/proc" >/dev/null 2>&1 || status=1
+    fi
+    if mountpoint -q "$test_dir/bind"; then
+        sudo umount "$test_dir/bind" >/dev/null 2>&1 || status=1
+    fi
+    return "$status"
+}
+
+cmd_doctor() {
+    validate_config
+    log "Environment doctor"
+    doctor_check "WSL2 kernel detected" check_wsl2
+    doctor_check "Project uses the native Linux filesystem" check_native_filesystem
+    doctor_check "At least ${MIN_FREE_GIB} GiB is available" check_disk_space
+    doctor_check "All required commands are installed" check_tools
+    [[ ${EUID:-$(id -u)} -ne 0 ]] || die "Run make doctor as your normal user, not root."
+    log "Refreshing sudo credentials..."
+    if sudo -v; then
+        ok "sudo authentication succeeded"
+        doctor_check "sudo can create and remove bind and proc mounts" check_mount_capability
+    else
+        doctor_failure "sudo authentication succeeded"
+        doctor_failure "sudo can create and remove bind and proc mounts (not tested)"
+    fi
+    if (( DOCTOR_FAILURES > 0 )); then
+        die "Environment doctor found $DOCTOR_FAILURES failed requirement(s)."
+    fi
+    ok "Configuration is valid: $NAPOS_NAME $NAPOS_VERSION on Mint $BASE_VERSION"
+}
+run_external() {
+    local status=0
+    "$@" &
+    ACTIVE_CHILD_PID=$!
+    wait "$ACTIVE_CHILD_PID" || status=$?
+    ACTIVE_CHILD_PID=0
+    return "$status"
+}
+
+
+download_atomic() {
+    local url=$1
+    local destination=$2
+    local expected_sha256=${3:-}
+    local part="${destination}.part"
+    local actual quarantine
+    [[ -f "$destination" ]] && return 0
+    mkdir -p "$(dirname "$destination")"
+    log "Downloading $(basename "$destination")..."
+    if ! run_external curl --fail --location --retry 4 --retry-delay 3 --retry-all-errors \
+        --connect-timeout 20 --speed-time 60 --speed-limit 1024 \
+        --continue-at - --output "$part" "$url"; then
+        die "Download failed; resumable partial data was preserved at $part"
+    fi
+    if [[ -n "$expected_sha256" ]]; then
+        actual=$(sha256_of "$part")
+        if [[ "$actual" != "$expected_sha256" ]]; then
+            quarantine="${part}.invalid.$(date -u +%Y%m%dT%H%M%SZ)"
+            mv -- "$part" "$quarantine"
+            die "Downloaded checksum mismatch ($actual); quarantined at $quarantine"
+        fi
+        ok "Downloaded file matches pinned SHA-256 before publication."
+    fi
+    mv -- "$part" "$destination"
+}
+
+ensure_mint_key() {
+    local gnupg_home="$CACHE_DIR/gnupg"
+    local actual
+    local key_file key_url
+    mkdir -p "$gnupg_home"
+    chmod 0700 "$gnupg_home"
+
+    if ! gpg --homedir "$gnupg_home" --batch --list-keys "$MINT_SIGNING_KEY_ID" >/dev/null 2>&1; then
+        log "Importing the Linux Mint ISO signing key..."
+        mkdir -p "$DOWNLOAD_DIR"
+        key_file="$DOWNLOAD_DIR/linuxmint-signing-key.asc"
+        key_url="https://keys.openpgp.org/vks/v1/by-fingerprint/${MINT_SIGNING_FINGERPRINT}"
+        download_atomic "$key_url" "$key_file"
+        gpg --homedir "$gnupg_home" --batch --import "$key_file" >/dev/null 2>&1 ||
+            die "Unable to import the downloaded Linux Mint signing key."
+    fi
+
+    actual=$(gpg --homedir "$gnupg_home" --batch --with-colons \
+        --fingerprint "$MINT_SIGNING_KEY_ID" | awk -F: '$1 == "fpr" {print $10; exit}')
+    [[ "$(trim_fingerprint "$actual")" == "$(trim_fingerprint "$MINT_SIGNING_FINGERPRINT")" ]] ||
+        die "Mint signing-key fingerprint mismatch: $actual"
+    ok "Mint signing-key fingerprint: $actual"
+}
+
+verify_signed_manifest() {
+    local manifest=$1
+    local signature=$2
+    local gnupg_home="$CACHE_DIR/gnupg"
+    local status_file valid_fingerprint manifest_hash
+    status_file=$(mktemp "${TMPDIR:-/tmp}/napos.gpg.XXXXXXXX")
+    TEMP_PATHS+=("$status_file")
+
+    gpg --homedir "$gnupg_home" --batch --status-fd 1 \
+        --verify "$signature" "$manifest" >"$status_file" 2>/dev/null ||
+        die "Linux Mint checksum-manifest signature verification failed."
+    valid_fingerprint=$(awk '$2 == "VALIDSIG" {print $3; exit}' "$status_file")
+    [[ "$(trim_fingerprint "$valid_fingerprint")" == "$(trim_fingerprint "$MINT_SIGNING_FINGERPRINT")" ]] ||
+        die "Manifest was signed by an unexpected key: $valid_fingerprint"
+    ok "Detached checksum-manifest signature is valid."
+
+    manifest_hash=$(awk -v file="$BASE_ISO_NAME" '
+        $2 == file || $2 == "*" file {print $1; exit}
+    ' "$manifest")
+    [[ -n "$manifest_hash" ]] || die "$BASE_ISO_NAME is missing from the signed manifest."
+    [[ "$manifest_hash" == "$BASE_ISO_SHA256" ]] ||
+        die "Signed manifest hash differs from config/source.lock: $manifest_hash"
+    ok "Signed manifest matches the pinned ISO hash."
+}
+
+cmd_fetch() {
+    local manifest="$DOWNLOAD_DIR/sha256sum.txt"
+    local signature="$DOWNLOAD_DIR/sha256sum.txt.gpg"
+    local iso="$DOWNLOAD_DIR/$BASE_ISO_NAME"
+    local actual quarantine
+
+    validate_config
+    mkdir -p "$CACHE_DIR"
+    exec 8>"$CACHE_DIR/.fetch.lock"
+    flock -n 8 || die "Another NapOS fetch holds $CACHE_DIR/.fetch.lock"
+    mkdir -p "$DOWNLOAD_DIR"
+    ensure_mint_key
+    download_atomic "$BASE_MIRROR/sha256sum.txt" "$manifest"
+    download_atomic "$BASE_MIRROR/sha256sum.txt.gpg" "$signature"
+    verify_signed_manifest "$manifest" "$signature"
+
+    if [[ -f "$iso" ]]; then
+        actual=$(sha256_of "$iso")
+        if [[ "$actual" != "$BASE_ISO_SHA256" ]]; then
+            quarantine="${iso}.invalid.$(date -u +%Y%m%dT%H%M%SZ)"
+            mv -- "$iso" "$quarantine"
+            warn "Quarantined an invalid cached ISO at $quarantine"
+        fi
+    fi
+    download_atomic "$BASE_MIRROR/$BASE_ISO_NAME" "$iso" "$BASE_ISO_SHA256"
+    actual=$(sha256_of "$iso")
+    [[ "$actual" == "$BASE_ISO_SHA256" ]] || die "Base ISO checksum mismatch: $actual"
+    printf 'sha256=%s\nverified_at=%s\n' "$actual" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$DOWNLOAD_DIR/$BASE_ISO_NAME.verified"
+    ok "Authenticated base ISO SHA-256: $actual"
+    ok "Authenticated base ISO: $iso"
+}
+
+base_iso_path() {
+    local path="$DOWNLOAD_DIR/$BASE_ISO_NAME"
+    [[ -f "$path" ]] || cmd_fetch
+    [[ "$(sha256_of "$path")" == "$BASE_ISO_SHA256" ]] || die "Cached base ISO no longer matches its pinned hash."
+    printf '%s\n' "$path"
+}
+
+validate_extracted_base() {
+    local root=$1
+    local launcher
+    [[ -f "$root/iso-tree/casper/filesystem.squashfs" ]] || return 1
+    compgen -G "$root/iso-tree/casper/vmlinuz*" >/dev/null || return 1
+    compgen -G "$root/iso-tree/casper/initrd*" >/dev/null || return 1
+    [[ -d "$root/iso-tree/boot" && -d "$root/iso-tree/EFI" ]] || return 1
+    [[ -d "$root/rootfs/etc" && -x "$root/rootfs/bin/bash" ]] || return 1
+    [[ -f "$root/rootfs/usr/lib/os-release" || -f "$root/rootfs/etc/os-release" ]] || return 1
+    for launcher in \
+        usr/share/applications/ubiquity.desktop \
+        usr/share/applications/live-installer.desktop \
+        usr/share/applications/calamares.desktop; do
+        if [[ -f "$root/rootfs/$launcher" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+validate_base_cache() {
+    local root=$1
+    validate_extracted_base "$root" || return 1
+    [[ -f "$root/.complete" ]] || return 1
+    grep -qx "sha256=$BASE_ISO_SHA256" "$root/.complete" || return 1
+    return 0
+}
+
+prepare_base_cache() {
+    local base_iso tmp boot_report
+    if validate_base_cache "$BASE_CACHE_DIR"; then
+        ok "Using immutable base cache: $BASE_CACHE_DIR"
+        return 0
+    fi
+
+    need_sudo
+    base_iso=$(base_iso_path)
+    mkdir -p "$CACHE_DIR/base"
+    tmp="$CACHE_DIR/base/.${BASE_ISO_SHA256}.tmp.$$"
+    assert_safe_path "$tmp" "$CACHE_DIR/base" || die "Unsafe base-cache temporary path."
+    if [[ -e "$tmp" ]]; then
+        require_clean_mount_state "$tmp"
+        sudo rm -rf -- "$tmp"
+    fi
+    mkdir -p "$tmp/iso-tree"
+
+    log "Extracting the authenticated ISO into the immutable cache..."
+    xorriso -osirrox on -indev "$base_iso" -extract / "$tmp/iso-tree"
+    [[ -f "$tmp/iso-tree/casper/filesystem.squashfs" ]] || die "Base ISO has no Casper SquashFS."
+
+    log "Expanding the base SquashFS..."
+    sudo unsquashfs -no-progress -d "$tmp/rootfs" "$tmp/iso-tree/casper/filesystem.squashfs"
+    validate_extracted_base "$tmp" || die "Extracted ISO, boot files, installer, or rootfs are incomplete."
+
+    boot_report=$(xorriso -indev "$base_iso" -report_el_torito plain 2>&1)
+    grep -q 'BIOS' <<<"$boot_report" || die "Base ISO has no legacy BIOS boot entry."
+    grep -Eq 'UEFI|EFI' <<<"$boot_report" || die "Base ISO has no EFI boot entry."
+
+    require_clean_mount_state "$tmp"
+    printf 'sha256=%s\ncreated_at=%s\n' "$BASE_ISO_SHA256" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$tmp/.complete"
+    if [[ -e "$BASE_CACHE_DIR" ]]; then
+        require_clean_mount_state "$BASE_CACHE_DIR"
+        sudo rm -rf -- "$BASE_CACHE_DIR"
+    fi
+    mv -- "$tmp" "$BASE_CACHE_DIR"
+    ok "Immutable base cache created."
+}
+
+prepare_work_tree() {
+    mkdir -p "$WORK_DIR" "$DIST_DIR"
+    cleanup_mounts "$ROOTFS"
+    safe_remove_tree "$ISO_TREE" "$WORK_DIR"
+    safe_remove_tree "$ROOTFS" "$WORK_DIR"
+    safe_remove_tree "$META_DIR" "$WORK_DIR"
+    mkdir -p "$ISO_TREE" "$META_DIR"
+
+    log "Creating a fresh ISO work tree..."
+    rsync -aH --delete "$BASE_CACHE_DIR/iso-tree/" "$ISO_TREE/"
+    log "Creating a fresh rootfs work tree..."
+    sudo rsync -aHAX --numeric-ids --delete "$BASE_CACHE_DIR/rootfs/" "$ROOTFS/"
+    # xorriso preserves the base ISO's read-only Casper directory permissions.
+    # Removing an entry from that directory therefore requires the build's
+    # already-authenticated sudo context, even though ISO_TREE itself is owned
+    # by the invoking user.
+    sudo rm -f -- "$ISO_TREE/casper/filesystem.squashfs"
+    printf 'sha256=%s\n' "$BASE_ISO_SHA256" >"$META_DIR/source"
+    ok "Fresh work tree is ready."
+}
+
+save_and_enable_dns() {
+    if [[ -e "$ROOTFS/etc/resolv.conf" || -L "$ROOTFS/etc/resolv.conf" ]]; then
+        sudo cp -a "$ROOTFS/etc/resolv.conf" "$META_DIR/resolv.conf.original"
+    else
+        : >"$META_DIR/resolv.was-missing"
+    fi
+    sudo rm -f -- "$ROOTFS/etc/resolv.conf"
+    sudo cp -L /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
+}
+
+restore_dns() {
+    sudo rm -f -- "$ROOTFS/etc/resolv.conf"
+    if [[ -e "$META_DIR/resolv.conf.original" || -L "$META_DIR/resolv.conf.original" ]]; then
+        sudo cp -a "$META_DIR/resolv.conf.original" "$ROOTFS/etc/resolv.conf"
+    fi
+}
+
+mount_chroot() {
+    sudo mount --rbind /dev "$ROOTFS/dev"
+    sudo mount --make-rslave "$ROOTFS/dev"
+    sudo mount -t proc proc "$ROOTFS/proc"
+    sudo mount --rbind /sys "$ROOTFS/sys"
+    sudo mount --make-rslave "$ROOTFS/sys"
+}
+
+install_packages_and_hooks() {
+    local hook hook_name
+    save_and_enable_dns
+    printf '#!/bin/sh\nexit 101\n' | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" >/dev/null
+    sudo chmod 0755 "$ROOTFS/usr/sbin/policy-rc.d"
+    sudo install -m 0644 "$CONFIG_DIR/packages.txt" "$ROOTFS/tmp/napos-packages.txt"
+    sudo mkdir -p "$ROOTFS/tmp/napos-hooks"
+    if compgen -G "$CONFIG_DIR/hooks/*.sh" >/dev/null; then
+        sudo cp "$CONFIG_DIR"/hooks/*.sh "$ROOTFS/tmp/napos-hooks/"
+    fi
+
+    mount_chroot
+    log "Installing repository packages in the chroot..."
+    sudo chroot "$ROOTFS" /usr/bin/env -i \
+        HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        DEBIAN_FRONTEND=noninteractive /bin/bash -euxc '
+            apt-get update
+            sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/napos-packages.txt |
+                xargs -r apt-get install -y --no-install-recommends
+        '
+
+    log "Applying the NapOS filesystem overlay..."
+    sudo rsync -aHAX "$CONFIG_DIR/overlay/" "$ROOTFS/"
+
+    for hook in "$CONFIG_DIR"/hooks/*.sh; do
+        [[ -f "$hook" ]] || continue
+        hook_name=$(basename "$hook")
+        log "Running customization hook: $hook_name"
+        sudo chroot "$ROOTFS" /usr/bin/env -i \
+            HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            DEBIAN_FRONTEND=noninteractive \
+            NAPOS_NAME="$NAPOS_NAME" NAPOS_ID="$NAPOS_ID" NAPOS_VERSION="$NAPOS_VERSION" \
+            NAPOS_EDITION="$NAPOS_EDITION" BASE_VERSION="$BASE_VERSION" BASE_CODENAME="$BASE_CODENAME" \
+            UBUNTU_CODENAME="$UBUNTU_CODENAME" DEFAULT_LOCALE="$DEFAULT_LOCALE" \
+            DEFAULT_TIMEZONE="$DEFAULT_TIMEZONE" BUILD_PROFILE="$BUILD_PROFILE" \
+            BUILD_ID="$BUILD_ID" BUILD_TIMESTAMP="$BUILD_TIMESTAMP" \
+            /bin/bash "/tmp/napos-hooks/$hook_name"
+    done
+}
+
+validate_customized_rootfs() {
+    local package
+    local packages=(vlc gimp flameshot git curl htop vim)
+    sudo chroot "$ROOTFS" /bin/bash -euc '
+        source /usr/lib/os-release
+        [[ "$NAME" == "NapOS" ]]
+        [[ "$PRETTY_NAME" == "NapOS 0.1.0" ]]
+        [[ "$ID" == "linuxmint" ]]
+        [[ "$VERSION_ID" == "22.3" ]]
+        [[ "$VERSION_CODENAME" == "zena" ]]
+        [[ "$UBUNTU_CODENAME" == "noble" ]]
+        [[ "$VARIANT" == "NapOS" ]]
+        [[ "$VARIANT_ID" == "napos" ]]
+        [[ -f /etc/napos-release ]]
+        [[ "$(cat /etc/timezone)" == "Asia/Bangkok" ]]
+        grep -qx "LANG=en_US.UTF-8" /etc/default/locale
+        [[ -f /usr/share/backgrounds/napos/napos-wallpaper.svg ]]
+        [[ -f /usr/share/icons/hicolor/scalable/apps/napos-logo.svg ]]
+        [[ -s /etc/dconf/db/local ]]
+        grep -q "napos-wallpaper.svg" /etc/dconf/db/local.d/00-napos
+        grep -Rqs "Name=Install NapOS" /usr/share/applications
+        grep -Rqs "Name\[vi\]=Cài đặt NapOS" /usr/share/applications
+        grep -Rqs "Icon=napos-logo" /usr/share/applications
+    '
+    sudo cmp -s "$ROOTFS/etc/lsb-release" "$BASE_CACHE_DIR/rootfs/etc/lsb-release" ||
+        die "/etc/lsb-release changed; Mint technical identity must be preserved."
+    sudo diff -qr "$ROOTFS/etc/apt" "$BASE_CACHE_DIR/rootfs/etc/apt" >/dev/null ||
+        die "APT source configuration changed; Mint repository metadata must be preserved."
+    for package in "${packages[@]}"; do
+        sudo chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$package" | grep -q '^ii' ||
+            die "Expected package is not installed: $package"
+    done
+    if sudo grep -Rqs --exclude='napos-build' 'Napos' \
+        "$ROOTFS/etc/napos-release" "$ROOTFS/usr/lib/os-release" \
+        "$ROOTFS/usr/share/applications"; then
+        die 'Incorrect product capitalization "Napos" found in generated branding.'
+    fi
+    ok "Customized rootfs assertions passed."
+}
+
+clean_chroot() {
+    log "Cleaning package and build state..."
+    sudo chroot "$ROOTFS" /bin/bash -euxc '
+        apt-get clean
+        rm -rf /var/lib/apt/lists/* /tmp/napos-hooks /tmp/napos-packages.txt
+        rm -f /usr/sbin/policy-rc.d /var/lib/dbus/machine-id
+        : > /etc/machine-id
+    '
+    cleanup_mounts "$ROOTFS"
+    restore_dns
+    require_clean_mount_state "$ROOTFS"
+    for virtual_dir in dev proc sys run; do
+        sudo mkdir -p "$ROOTFS/$virtual_dir"
+        sudo find "$ROOTFS/$virtual_dir" -xdev -depth -mindepth 1 -delete
+        if sudo find "$ROOTFS/$virtual_dir" -xdev -mindepth 1 -print -quit |
+            grep -q .; then
+            die "Virtual filesystem staging directory is not empty: $ROOTFS/$virtual_dir"
+        fi
+    done
+    ok "Chroot cleaned; DNS restored; virtual directories are empty and unmounted."
+}
+
+write_installer_manifest() {
+    sudo chroot "$ROOTFS" dpkg-query -W -f='${Package} ${Version}\n' |
+        sudo tee "$ISO_TREE/casper/filesystem.manifest" >/dev/null
+    sudo du -sx --block-size=1 "$ROOTFS" | awk '{print $1}' |
+        sudo tee "$ISO_TREE/casper/filesystem.size" >/dev/null
+    sudo chmod 0644 "$ISO_TREE/casper/filesystem.manifest" "$ISO_TREE/casper/filesystem.size"
+}
+
+build_squashfs() {
+    local profile=$1
+    local options
+    sudo rm -f -- "$ISO_TREE/casper/filesystem.squashfs"
+    case "$profile" in
+        dev) options=(-comp lz4 -noappend) ;;
+        release) options=(-comp xz -b 1M -Xdict-size 100% -noappend) ;;
+        *) die "Unsupported profile: $profile" ;;
+    esac
+    log "Building ${profile} SquashFS..."
+    sudo mksquashfs "$ROOTFS" "$ISO_TREE/casper/filesystem.squashfs" "${options[@]}"
+    sudo chmod 0644 "$ISO_TREE/casper/filesystem.squashfs"
+    write_installer_manifest
+}
+
+write_iso_md5s() {
+    local temporary_md5="$META_DIR/md5sum.txt.$$"
+    log "Refreshing ISO file checksums..."
+    (
+        cd "$ISO_TREE"
+        find . -type f ! -name md5sum.txt ! -path './isolinux/boot.cat' -print0 |
+            sort -z | xargs -0 md5sum >"$temporary_md5"
+    )
+    # The upstream ISO ships md5sum.txt as 0444. Force replacement so this
+    # unattended build never prompts for confirmation on a terminal.
+    mv -f -- "$temporary_md5" "$ISO_TREE/md5sum.txt"
+}
+
+write_build_info() {
+    local iso=$1
+    local profile=$2
+    local info="${iso%.iso}.build-info.json"
+    local compression elapsed
+    [[ "$profile" == "dev" ]] && compression="lz4" || compression="xz"
+    elapsed=$(( $(date +%s) - BUILD_STARTED_AT ))
+    jq -n \
+        --arg product "$NAPOS_NAME" \
+        --arg version "$NAPOS_VERSION" \
+        --arg build_id "$BUILD_ID" \
+        --arg profile "$profile" \
+        --arg compression "$compression" \
+        --arg base_version "$BASE_VERSION" \
+        --arg base_iso "$BASE_ISO_NAME" \
+        --arg base_sha256 "$BASE_ISO_SHA256" \
+        --arg git_commit "$(git_revision)" \
+        --argjson git_dirty "$(git_dirty)" \
+        --arg package_list_sha256 "$(package_list_hash)" \
+        --arg manifest_remove_sha256 "$(sha256_of "$ISO_TREE/casper/filesystem.manifest-remove")" \
+        --arg timestamp "$BUILD_TIMESTAMP" \
+        --arg xorriso_version "$(xorriso -version 2>&1 | head -n1)" \
+        --arg squashfs_version "$(unsquashfs -version 2>&1 | head -n1)" \
+        --argjson duration_seconds "$elapsed" \
+        '{product:$product, version:$version, build_id:$build_id, profile:$profile,
+          compression:$compression, base:{version:$base_version, iso:$base_iso, sha256:$base_sha256},
+          source:{git_commit:$git_commit, git_dirty:$git_dirty, package_list_sha256:$package_list_sha256,
+                  manifest_remove_sha256:$manifest_remove_sha256},
+          built_at:$timestamp, tools:{xorriso:$xorriso_version, squashfs:$squashfs_version},
+          duration_seconds:$duration_seconds, byte_reproducible:false}' >"$info"
+}
+
+repack_iso() {
+    local profile=$1
+    local base_iso output tmp_output
+    base_iso=$(base_iso_path)
+    output=$(output_iso_for_profile "$profile")
+    tmp_output="$DIST_DIR/.${output##*/}.tmp.$$"
+    rm -f -- "$tmp_output" "$output"
+    log "Replaying Mint's BIOS/EFI boot layout into the NapOS ISO..."
+    xorriso -indev "$base_iso" -outdev "$tmp_output" \
+        -volid "$ISO_VOLUME_ID" \
+        -map "$ISO_TREE/casper/filesystem.squashfs" /casper/filesystem.squashfs \
+        -map "$ISO_TREE/casper/filesystem.size" /casper/filesystem.size \
+        -map "$ISO_TREE/casper/filesystem.manifest" /casper/filesystem.manifest \
+        -map "$ISO_TREE/md5sum.txt" /md5sum.txt \
+        -boot_image any replay -commit -end
+    mv -- "$tmp_output" "$output"
+    write_build_info "$output" "$profile"
+    (
+        cd "$DIST_DIR"
+        sha256sum "$(basename "$output")" >"$(basename "$output").sha256"
+    )
+    BUILT_ISO=$output
+}
+
+resolve_iso_argument() {
+    local requested=${1:-}
+    if [[ -n "$requested" ]]; then
+        [[ "$requested" = /* ]] || requested="$PROJECT_ROOT/$requested"
+        [[ -f "$requested" ]] || die "ISO does not exist: $requested"
+        realpath "$requested"
+    else
+        latest_iso
+    fi
+}
+
+extract_verification_files() {
+    local iso=$1
+    local temp=$2
+    xorriso -osirrox on -indev "$iso" \
+        -extract /casper/filesystem.squashfs "$temp/filesystem.squashfs" \
+        -extract /casper/filesystem.manifest "$temp/filesystem.manifest" \
+        -extract /casper/filesystem.manifest-remove "$temp/filesystem.manifest-remove" >/dev/null 2>&1
+}
+
+read_installer_launcher() {
+    local squashfs=$1
+    local launcher
+    for launcher in \
+        usr/share/applications/ubiquity.desktop \
+        usr/share/applications/live-installer.desktop \
+        usr/share/applications/calamares.desktop; do
+        if unsquashfs -cat "$squashfs" "$launcher" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+cmd_verify() {
+    local iso temp boot_report pvd_report sidecar
+    local package napos_release os_release timezone installer locale_data dconf_data
+    local squashfs_report compression expected_compression base_iso
+    local build_info
+    iso=$(resolve_iso_argument "${1:-}")
+    [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
+    sidecar="${iso}.sha256"
+    if [[ -f "$sidecar" ]]; then
+        (cd "$(dirname "$iso")" && sha256sum -c "$(basename "$sidecar")") >/dev/null || die "ISO SHA-256 sidecar check failed."
+        ok "ISO SHA-256 matches its sidecar."
+    else
+        warn "No checksum sidecar found; continuing with structural verification."
+    fi
+
+    pvd_report=$(xorriso -indev "$iso" -pvd_info 2>&1)
+    grep -q "$ISO_VOLUME_ID" <<<"$pvd_report" || die "Unexpected ISO volume ID."
+    boot_report=$(xorriso -indev "$iso" -report_el_torito plain 2>&1)
+    grep -q 'BIOS' <<<"$boot_report" || die "Legacy BIOS boot entry is missing."
+    grep -Eq 'UEFI|EFI' <<<"$boot_report" || die "EFI boot entry is missing."
+    ok "BIOS and EFI boot entries are present."
+
+    temp=$(with_temp_dir)
+    TEMP_PATHS+=("$temp")
+    extract_verification_files "$iso" "$temp"
+    [[ -s "$temp/filesystem.manifest-remove" ]] || die "filesystem.manifest-remove is missing or empty."
+    squashfs_report=$(unsquashfs -s "$temp/filesystem.squashfs" 2>&1) || die "SquashFS superblock validation failed."
+    compression=$(awk '$1 == "Compression" {print tolower($2); exit}' <<<"$squashfs_report")
+    if [[ "$(basename "$iso")" == *-dev-* ]]; then
+        expected_compression=lz4
+    else
+        expected_compression=xz
+    fi
+    [[ "$compression" == "$expected_compression" ]] ||
+        die "Expected $expected_compression SquashFS compression, found ${compression:-unknown}."
+    ok "SquashFS is valid and uses $compression compression."
+
+    base_iso="$DOWNLOAD_DIR/$BASE_ISO_NAME"
+    if [[ -f "$base_iso" ]]; then
+        xorriso -osirrox on -indev "$base_iso" \
+            -extract /casper/filesystem.manifest-remove "$temp/base-filesystem.manifest-remove" >/dev/null 2>&1
+        cmp -s "$temp/filesystem.manifest-remove" "$temp/base-filesystem.manifest-remove" ||
+            die "filesystem.manifest-remove differs from the authenticated Mint input."
+    fi
+    napos_release=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null) || die "/etc/napos-release is missing."
+    os_release=$(unsquashfs -cat "$temp/filesystem.squashfs" usr/lib/os-release 2>/dev/null) || die "/usr/lib/os-release is missing."
+    timezone=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/timezone 2>/dev/null) || die "/etc/timezone is missing."
+    locale_data=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/default/locale 2>/dev/null) || die "/etc/default/locale is missing."
+    dconf_data=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local.d/00-napos 2>/dev/null) || die "NapOS dconf source is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local >/dev/null 2>&1 || die "Compiled NapOS dconf database is missing."
+    installer=$(read_installer_launcher "$temp/filesystem.squashfs") ||
+        die "No supported installer launcher exists in the SquashFS."
+
+    grep -qx 'NAPOS_NAME="NapOS"' <<<"$napos_release" || die "Embedded NapOS identity is incorrect."
+    grep -qx 'NAPOS_VERSION="0.1.0"' <<<"$napos_release" || die "Embedded NapOS version is incorrect."
+    grep -qx 'NAME="NapOS"' <<<"$os_release" || die "os-release NAME is incorrect."
+    grep -qx 'PRETTY_NAME="NapOS 0.1.0"' <<<"$os_release" || die "os-release PRETTY_NAME is incorrect."
+    grep -qx 'ID=linuxmint' <<<"$os_release" || die "Mint technical ID was not preserved."
+    grep -qx 'VERSION_CODENAME=zena' <<<"$os_release" || die "Mint codename was not preserved."
+    grep -qx 'UBUNTU_CODENAME=noble' <<<"$os_release" || die "Ubuntu codename was not preserved."
+    [[ "$timezone" == "$DEFAULT_TIMEZONE" ]] || die "Unexpected timezone: $timezone"
+    grep -qx 'LANG=en_US.UTF-8' <<<"$locale_data" || die "Default locale is not en_US.UTF-8."
+    grep -q 'napos-wallpaper.svg' <<<"$dconf_data" || die "NapOS wallpaper dconf default is missing."
+    grep -q '^Name=Install NapOS$' <<<"$installer" || die "Installer launcher is not branded Install NapOS."
+    grep -q '^Name\[vi\]=Cài đặt NapOS$' <<<"$installer" || die "Vietnamese installer label is not branded Cài đặt NapOS."
+    grep -q '^Icon=napos-logo$' <<<"$installer" || die "Installer launcher icon is not NapOS."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/backgrounds/napos/napos-wallpaper.svg >/dev/null 2>&1 || die "NapOS wallpaper is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/icons/hicolor/scalable/apps/napos-logo.svg >/dev/null 2>&1 || die "NapOS logo is missing."
+
+    for package in vlc gimp flameshot git curl htop vim; do
+        grep -Eq "^${package} " "$temp/filesystem.manifest" || die "Package is absent from filesystem.manifest: $package"
+    done
+    if grep -q 'Napos' <<<"$napos_release$os_release$installer"; then
+        die 'Incorrect product capitalization "Napos" found in the ISO.'
+    fi
+
+    build_info="${iso%.iso}.build-info.json"
+    if [[ -f "$build_info" ]]; then
+        [[ "$(jq -r .build_id "$build_info")" == "$(sed -n 's/^NAPOS_BUILD_ID="\(.*\)"$/\1/p' <<<"$napos_release")" ]] ||
+            die "Adjacent and embedded build IDs differ."
+        [[ "$(jq -r .compression "$build_info")" == "$compression" ]] ||
+            die "Adjacent provenance and SquashFS compression differ."
+        [[ "$(jq -r .source.manifest_remove_sha256 "$build_info")" == "$(sha256_of "$temp/filesystem.manifest-remove")" ]] ||
+            die "Adjacent provenance and manifest-remove hash differ."
+    fi
+    ok "NapOS identity, packages, locale, timezone, artwork, and installer metadata are valid."
+    ok "Verified ISO: $iso"
+}
+
+cmd_inspect() {
+    local iso temp
+    iso=$(resolve_iso_argument "${1:-}")
+    printf 'ISO: %s\nSize: %s\nSHA-256: %s\n\n' "$iso" "$(du -h "$iso" | awk '{print $1}')" "$(sha256_of "$iso")"
+    xorriso -indev "$iso" -pvd_info 2>&1 | sed -n '/Volume Id/p;/Volume id/p;/Creation Time/p'
+    printf '\nBoot equipment:\n'
+    xorriso -indev "$iso" -report_el_torito plain 2>&1
+    temp=$(with_temp_dir)
+    TEMP_PATHS+=("$temp")
+    extract_verification_files "$iso" "$temp"
+    printf '\nSquashFS:\n'
+    unsquashfs -s "$temp/filesystem.squashfs"
+    printf '\nNapOS release:\n'
+    unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
+    printf '\nSelected packages:\n'
+    for package in vlc gimp flameshot git curl htop vim; do
+        awk -v wanted="$package" '$1 == wanted {print; found=1} END {if (!found) print wanted " (missing)"}' \
+            "$temp/filesystem.manifest"
+    done
+    if [[ -f "${iso%.iso}.build-info.json" ]]; then
+        printf '\nBuild information:\n'
+        jq . "${iso%.iso}.build-info.json"
+    fi
+}
+
+cmd_build() {
+    local profile=${1:-}
+    local output log_file
+    [[ "$profile" == "dev" || "$profile" == "release" ]] || die "Build profile must be dev or release."
+    validate_config
+    cmd_doctor
+    mkdir -p "$WORK_DIR" "$DIST_DIR"
+    exec 9>"$WORK_DIR/.build.lock"
+    flock -n 9 || die "Another NapOS build holds $WORK_DIR/.build.lock"
+
+    BUILD_PROFILE=$profile
+    BUILD_ID=$(build_id)
+    BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    BUILD_STARTED_AT=$(date +%s)
+    export BUILD_PROFILE BUILD_ID BUILD_TIMESTAMP
+    log_file="$DIST_DIR/build-${profile}.log"
+    : >"$log_file"
+    exec > >(tee -a "$log_file") 2>&1
+    ACTIVE_BUILD=1
+
+    log "Starting NapOS $NAPOS_VERSION $profile build (build ID $BUILD_ID)"
+    cmd_fetch
+    prepare_base_cache
+    prepare_work_tree
+    install_packages_and_hooks
+    validate_customized_rootfs
+    clean_chroot
+    build_squashfs "$profile"
+    write_iso_md5s
+    repack_iso "$profile"
+    output=$BUILT_ISO
+    cmd_verify "$output"
+    ACTIVE_BUILD=0
+    ok "Build complete: $output"
+    ok "Checksum: $(sha256_of "$output")"
+    ok "Size: $(du -h "$output" | awk '{print $1}')"
+    ok "Log: $log_file"
+}
+
+cmd_clean_work() {
+    mkdir -p "$WORK_DIR"
+    exec 9>"$WORK_DIR/.build.lock"
+    flock -n 9 || die "Refusing cleanup while another NapOS build is active."
+    need_sudo
+    cleanup_mounts "$ROOTFS"
+    for path in "$ISO_TREE" "$ROOTFS" "$META_DIR"; do
+        safe_remove_tree "$path" "$WORK_DIR"
+    done
+    ok "Removed disposable work state; authenticated caches were preserved."
+}
+
+cmd_clean_cache() {
+    mkdir -p "$CACHE_DIR" "$WORK_DIR"
+    exec 9>"$WORK_DIR/.build.lock"
+    flock -n 9 || die "Refusing cache cleanup while a NapOS build is active."
+    exec 8>"$CACHE_DIR/.fetch.lock"
+    flock -n 8 || die "Refusing cache cleanup while a NapOS fetch or build is active."
+    need_sudo
+    cleanup_mounts "$ROOTFS"
+    require_clean_mount_state "$CACHE_DIR"
+    for path in "$CACHE_DIR/downloads" "$CACHE_DIR/base" "$CACHE_DIR/gnupg"; do
+        [[ -e "$path" ]] || continue
+        safe_remove_tree "$path" "$CACHE_DIR"
+    done
+    ok "Removed authenticated downloads, extraction caches, and isolated GPG state."
+}
+
+case "${1:-help}" in
+    help|-h|--help) usage ;;
+    doctor) cmd_doctor ;;
+    fetch) cmd_fetch ;;
+    build) cmd_build "${2:-}" ;;
+    verify) cmd_verify "${2:-}" ;;
+    inspect) cmd_inspect "${2:-}" ;;
+    clean-work) cmd_clean_work ;;
+    clean-cache) cmd_clean_cache ;;
+    *) die "Unknown command: ${1:-}. Run make help." ;;
+esac
