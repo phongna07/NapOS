@@ -452,7 +452,7 @@ install_packages_and_hooks() {
 
 validate_customized_rootfs() {
     local package
-    local packages=(vlc gimp flameshot git curl htop vim)
+    local packages=(vlc flameshot git curl htop vim)
     sudo chroot "$ROOTFS" /bin/bash -euc '
         source /usr/lib/os-release
         [[ "$NAME" == "NapOS" ]]
@@ -707,7 +707,7 @@ cmd_verify() {
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/backgrounds/napos/napos-wallpaper.svg >/dev/null 2>&1 || die "NapOS wallpaper is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/icons/hicolor/scalable/apps/napos-logo.svg >/dev/null 2>&1 || die "NapOS logo is missing."
 
-    for package in vlc gimp flameshot git curl htop vim; do
+    for package in vlc flameshot git curl htop vim; do
         grep -Eq "^${package} " "$temp/filesystem.manifest" || die "Package is absent from filesystem.manifest: $package"
     done
     if grep -q 'Napos' <<<"$napos_release$os_release$installer"; then
@@ -742,7 +742,7 @@ cmd_inspect() {
     printf '\nNapOS release:\n'
     unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
     printf '\nSelected packages:\n'
-    for package in vlc gimp flameshot git curl htop vim; do
+    for package in vlc flameshot git curl htop vim; do
         awk -v wanted="$package" '$1 == wanted {print; found=1} END {if (!found) print wanted " (missing)"}' \
             "$temp/filesystem.manifest"
     done

@@ -98,7 +98,7 @@ else
     fail "Checksum helper detects tampering"
 fi
 
-expected_packages=$'curl\nflameshot\ngimp\ngit\nhtop\nvim\nvlc'
+expected_packages=$'curl\nflameshot\ngit\nhtop\nvim\nvlc'
 actual_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$PROJECT_ROOT/config/packages.txt" | sort)
 if [[ "$actual_packages" == "$expected_packages" ]]; then
     pass "Desktop-essential package profile is exact"

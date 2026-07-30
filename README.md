@@ -62,7 +62,7 @@ under `dist/`.
    into a cache keyed by the authenticated ISO hash.
 4. **Fresh work tree:** copies the immutable cache for every build so package
    changes never accumulate across builds.
-5. **Customize:** installs VLC, GIMP, Flameshot, Git, Curl, Htop, and Vim;
+5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, and Vim;
    applies English/Bangkok defaults and original NapOS artwork.
 6. **Clean:** removes APT/build state, restores DNS, and verifies all chroot
    mounts are gone.

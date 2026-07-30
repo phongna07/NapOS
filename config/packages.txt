@@ -1,7 +1,6 @@
 # Packages from the Linux Mint / Ubuntu repositories.
 curl
 flameshot
-gimp
 git
 htop
 vim
