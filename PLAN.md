@@ -11,5 +11,10 @@
 - [ ] Zalo appimage
 - [ ] OnlyOffice
 - [ ] zsh shell
+- [ ] config vlc media player as the default
 - [ ] clipboard history
+- [ ] add desktop icons and taskbar icons
+- [ ] center the taskbar
+- [ ] add some kind of system monitor to the left of the taskbar
+- [ ] set "Intall multimedia codecs as the default"
 - [ ] OTA update
