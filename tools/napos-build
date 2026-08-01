@@ -885,6 +885,9 @@ install_packages_and_hooks() {
         HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin \
         DEBIAN_FRONTEND=noninteractive /bin/bash -euxc '
             apt-get update
+            printf "%s\n" \
+                "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula boolean true" |
+                debconf-set-selections
             sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/napos-packages.txt |
                 xargs -r apt-get install -y --no-install-recommends
             apt-get install -y --no-install-recommends /tmp/napos-google-chrome.deb
@@ -918,8 +921,25 @@ install_packages_and_hooks() {
 
 validate_customized_rootfs() {
     local package chrome_key_fingerprint chrome_source dconf_data base_reference
-    local lotus_key_fingerprint lotus_source
-    local packages=(vlc flameshot git curl htop vim fcitx5 fcitx5-config-qt fcitx5-frontend-all)
+    local lotus_key_fingerprint lotus_source apt_conffile apt_package apt_path
+    local apt_conf_diff_args=(-qr)
+    local apt_preferences_diff_args=(-qr)
+    local apt_sources_diff_args=(
+        -qr --exclude=google-chrome.sources --exclude=fcitx5-lotus.sources
+    )
+    local apt_package_conffiles=(
+        update-notifier-common:/etc/apt/apt.conf.d/10periodic
+        update-notifier-common:/etc/apt/apt.conf.d/15update-stamp
+        update-notifier-common:/etc/apt/apt.conf.d/20archive
+        update-notifier-common:/etc/apt/apt.conf.d/99update-notifier
+        ubuntu-pro-client:/etc/apt/apt.conf.d/20apt-esm-hook.conf
+        ubuntu-pro-client:/etc/apt/preferences.d/ubuntu-pro-esm-apps
+        ubuntu-pro-client:/etc/apt/preferences.d/ubuntu-pro-esm-infra
+    )
+    local packages=(
+        vlc flameshot git curl htop vim ttf-mscorefonts-installer
+        fcitx5 fcitx5-config-qt fcitx5-frontend-all
+    )
     local remove_packages=()
     mapfile -t remove_packages < <(
         sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$CONFIG_DIR/packages-remove.txt"
@@ -949,6 +969,19 @@ validate_customized_rootfs() {
         [[ -f /usr/share/applications/vlc.desktop ]]
         [[ -x /usr/bin/onlyoffice-desktopeditors ]]
         [[ -f /usr/share/applications/onlyoffice-desktopeditors.desktop ]]
+        for font in \
+            Andale_Mono.ttf Arial_Black.ttf Arial.ttf Arial_Bold.ttf \
+            Arial_Bold_Italic.ttf Arial_Italic.ttf Comic_Sans_MS.ttf \
+            Comic_Sans_MS_Bold.ttf Courier_New.ttf Courier_New_Bold.ttf \
+            Courier_New_Italic.ttf Courier_New_Bold_Italic.ttf Georgia.ttf \
+            Georgia_Bold.ttf Georgia_Italic.ttf Georgia_Bold_Italic.ttf Impact.ttf \
+            Times_New_Roman.ttf Times_New_Roman_Bold.ttf \
+            Times_New_Roman_Bold_Italic.ttf Times_New_Roman_Italic.ttf \
+            Trebuchet_MS.ttf Trebuchet_MS_Bold.ttf Trebuchet_MS_Italic.ttf \
+            Trebuchet_MS_Bold_Italic.ttf Verdana.ttf Verdana_Bold.ttf \
+            Verdana_Italic.ttf Verdana_Bold_Italic.ttf Webdings.ttf; do
+            [[ -s "/usr/share/fonts/truetype/msttcorefonts/$font" ]]
+        done
         [[ -x /usr/bin/fcitx5 ]]
         [[ -x /usr/bin/fcitx5-config-qt ]]
         [[ -f /usr/share/applications/org.fcitx.fcitx5-config-qt.desktop ]]
@@ -1052,9 +1085,28 @@ validate_customized_rootfs() {
     base_reference=$(base_reference_root)
     sudo cmp -s "$ROOTFS/etc/lsb-release" "$base_reference/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
-    sudo diff -qr --exclude=google-chrome.sources --exclude=fcitx5-lotus.sources \
-        "$ROOTFS/etc/apt" "$base_reference/etc/apt" >/dev/null ||
-        die "Mint APT configuration changed outside the approved Chrome and Fcitx5 Lotus sources."
+    for apt_conffile in "${apt_package_conffiles[@]}"; do
+        IFS=: read -r apt_package apt_path <<<"$apt_conffile"
+        verify_installed_conffile "$ROOTFS" "$apt_package" "$apt_path" ||
+            die "Package-managed APT configuration is missing or modified: $apt_path"
+        case "$apt_path" in
+            /etc/apt/apt.conf.d/*) apt_conf_diff_args+=("--exclude=${apt_path##*/}") ;;
+            /etc/apt/preferences.d/*) apt_preferences_diff_args+=("--exclude=${apt_path##*/}") ;;
+            *) die "Package-managed APT conffile is outside the approved directories: $apt_path" ;;
+        esac
+    done
+    if ! {
+        sudo diff -qr --exclude=apt.conf.d --exclude=preferences.d --exclude=sources.list.d \
+            "$ROOTFS/etc/apt" "$base_reference/etc/apt" >/dev/null &&
+            sudo diff "${apt_conf_diff_args[@]}" \
+                "$ROOTFS/etc/apt/apt.conf.d" "$base_reference/etc/apt/apt.conf.d" >/dev/null &&
+            sudo diff "${apt_preferences_diff_args[@]}" \
+                "$ROOTFS/etc/apt/preferences.d" "$base_reference/etc/apt/preferences.d" >/dev/null &&
+            sudo diff "${apt_sources_diff_args[@]}" \
+                "$ROOTFS/etc/apt/sources.list.d" "$base_reference/etc/apt/sources.list.d" >/dev/null
+    }; then
+        die "Mint APT configuration changed outside approved sources and package-managed conffiles."
+    fi
     chrome_source="$ROOTFS/etc/apt/sources.list.d/google-chrome.sources"
     [[ -f "$chrome_source" ]] || die "Google Chrome APT source is missing."
     validate_chrome_apt_source "$chrome_source" || die "Unexpected Google Chrome APT source configuration."
@@ -1572,8 +1624,15 @@ cmd_verify() {
     grep -q '^Icon=napos-logo$' <<<"$installer" || die "Installer launcher icon is not NapOS."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/backgrounds/napos/napos-wallpaper.svg >/dev/null 2>&1 || die "NapOS wallpaper is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/icons/hicolor/scalable/apps/napos-logo.svg >/dev/null 2>&1 || die "NapOS logo is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/fonts/truetype/msttcorefonts/Arial.ttf >/dev/null 2>&1 ||
+        die "Microsoft Arial font payload is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf >/dev/null 2>&1 ||
+        die "Microsoft Times New Roman font payload is missing."
 
-    for package in vlc flameshot git curl htop vim ibus fcitx5 fcitx5-config-qt fcitx5-frontend-all \
+    for package in vlc flameshot git curl htop vim ibus ttf-mscorefonts-installer \
+        fcitx5 fcitx5-config-qt fcitx5-frontend-all \
         "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
         grep -Eq "^${package} " "$temp/filesystem.manifest" || die "Package is absent from filesystem.manifest: $package"
     done
@@ -1599,6 +1658,10 @@ cmd_verify() {
     [[ -n "$lotus_version" ]] || die "Fcitx5 Lotus version is absent from filesystem.manifest."
     if grep -Eq "^${FCITX5_LOTUS_PACKAGE}([[:space:]]|$)" "$temp/filesystem.manifest-remove"; then
         die "Fcitx5 Lotus is listed for removal by the live installer."
+    fi
+    if grep -Eq '^ttf-mscorefonts-installer([[:space:]]|$)' \
+        "$temp/filesystem.manifest-remove"; then
+        die "Microsoft core fonts installer is listed for removal by the live installer."
     fi
     if grep -q 'Napos' <<<"$napos_release$os_release$installer"; then
         die 'Incorrect product capitalization "Napos" found in the ISO.'
@@ -1689,7 +1752,8 @@ cmd_inspect() {
     printf '\nNapOS release:\n'
     unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
     printf '\nSelected packages:\n'
-    for package in vlc flameshot git curl htop vim fcitx5 fcitx5-config-qt fcitx5-frontend-all \
+    for package in vlc flameshot git curl htop vim ttf-mscorefonts-installer \
+        fcitx5 fcitx5-config-qt fcitx5-frontend-all \
         "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
         awk -v wanted="$package" '$1 == wanted {print; found=1} END {if (!found) print wanted " (missing)"}' \
             "$temp/filesystem.manifest"

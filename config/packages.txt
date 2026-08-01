@@ -6,5 +6,6 @@ fcitx5-frontend-all
 flameshot
 git
 htop
+ttf-mscorefonts-installer
 vim
 vlc

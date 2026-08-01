@@ -424,7 +424,30 @@ printf 'Enabled: no\n' >>"$safe_root/fcitx5-lotus-disabled.sources"
 expect_failure "Fcitx5 Lotus APT source policy rejects extra options" \
     validate_fcitx5_lotus_apt_source "$safe_root/fcitx5-lotus-disabled.sources"
 
-expected_packages=$'curl\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngit\nhtop\nvim\nvlc'
+conffile_root="$safe_root/conffile-root"
+conffile_path=/etc/apt/apt.conf.d/10periodic
+mkdir -p "$conffile_root/etc/apt/apt.conf.d" "$conffile_root/var/lib/dpkg"
+printf 'APT::Periodic::Update-Package-Lists "1";\n' >"$conffile_root$conffile_path"
+conffile_md5=$(md5sum "$conffile_root$conffile_path" | awk '{print $1}')
+cat >"$conffile_root/var/lib/dpkg/status" <<EOF
+Package: update-notifier-common
+Status: install ok installed
+Architecture: all
+Version: 1
+Conffiles:
+ $conffile_path $conffile_md5
+Description: APT conffile test fixture
+
+EOF
+expect_success "Installed package conffile accepts the dpkg-recorded content" \
+    verify_installed_conffile "$conffile_root" update-notifier-common "$conffile_path"
+printf 'APT::Periodic::Update-Package-Lists "0";\n' >"$conffile_root$conffile_path"
+expect_failure "Installed package conffile rejects modified content" \
+    verify_installed_conffile "$conffile_root" update-notifier-common "$conffile_path"
+expect_failure "Installed package conffile rejects the wrong owning package" \
+    verify_installed_conffile "$conffile_root" unexpected-package "$conffile_path"
+
+expected_packages=$'curl\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngit\nhtop\nttf-mscorefonts-installer\nvim\nvlc'
 actual_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$PROJECT_ROOT/config/packages.txt" | sort)
 if [[ "$actual_packages" == "$expected_packages" ]]; then
     pass "Desktop-essential package profile is exact"
@@ -509,6 +532,20 @@ if grep -Fq '/usr/bin/env LOGNAME=root PATH=/tmp/napos-maintscript-bin:' <<<"$in
     pass "Lotus package installation isolates maintainer-script host side effects"
 else
     fail "Lotus package installation isolates maintainer-script host side effects"
+fi
+
+validation_function=$(sed -n '/^validate_customized_rootfs()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")
+if grep -Fq 'update-notifier-common:/etc/apt/apt.conf.d/10periodic' \
+    <<<"$validation_function" &&
+    grep -Fq 'ubuntu-pro-client:/etc/apt/apt.conf.d/20apt-esm-hook.conf' \
+    <<<"$validation_function" &&
+    grep -Fq 'ubuntu-pro-client:/etc/apt/preferences.d/ubuntu-pro-esm-infra' \
+    <<<"$validation_function" &&
+    grep -Fq 'verify_installed_conffile' <<<"$validation_function"; then
+    pass "Microsoft font dependencies permit only checksum-verified APT conffiles"
+else
+    fail "Microsoft font dependencies permit only checksum-verified APT conffiles"
 fi
 
 build_info_function=$(sed -n '/^write_build_info()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
@@ -596,6 +633,19 @@ else
 fi
 
 install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+eula_preseed_line=$(grep -n -F -m1 \
+    'ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula boolean true' \
+    <<<"$install_function" | cut -d: -f1 || true)
+repository_install_line=$(grep -n -F -m1 'xargs -r apt-get install' \
+    <<<"$install_function" | cut -d: -f1 || true)
+if [[ -n "$eula_preseed_line" && -n "$repository_install_line" ]] &&
+    ((eula_preseed_line < repository_install_line)) &&
+    grep -Fq 'debconf-set-selections' <<<"$install_function"; then
+    pass "Microsoft core fonts EULA is preseeded before repository package installation"
+else
+    fail "Microsoft core fonts EULA is preseeded before repository package installation"
+fi
+
 if grep -Fq 'napos-packages-remove.txt' <<<"$install_function" &&
     grep -Fq 'apt-get purge -y --' <<<"$install_function"; then
     pass "Build consumes the package removal profile with APT purge"

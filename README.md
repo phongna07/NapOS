@@ -18,7 +18,8 @@ make dev
 `make dev` is the complete development workflow. It authenticates and caches
 the Mint ISO, current Google Chrome stable package, and current ONLYOFFICE
 Desktop Editors package; makes a fresh work tree; installs selected packages,
-removes Firefox, applies NapOS customization,
+downloads and installs the Microsoft TrueType core fonts after accepting their
+EULA, removes Firefox, applies NapOS customization,
 builds an LZ4 SquashFS, preserves Mint's BIOS and EFI boot equipment, verifies
 the result, and writes artifacts to `dist/`.
 
@@ -99,9 +100,11 @@ under `dist/`.
 4. **Fresh work tree:** copies the immutable cache for every build so package
    changes never accumulate across builds.
 5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, Vim, Fcitx5 with
-   its GTK/Qt frontends, and the authenticated Google Chrome, ONLYOFFICE, and
-   Fcitx5 Lotus `.deb` files; configures Lotus for every live and installed
-   user; purges
+   its GTK/Qt frontends, the Microsoft TrueType core fonts, and the authenticated
+   Google Chrome, ONLYOFFICE, and Fcitx5 Lotus `.deb` files; pre-accepts the
+   Microsoft font EULA for the noninteractive build, downloads the checksummed
+   font payload through Ubuntu's installer package, configures Lotus for every
+   live and installed user; purges
    Firefox and its language packs, Mint Chat, Celluloid, and the complete
    LibreOffice suite; makes Chrome the default browser and ONLYOFFICE the
    default for Microsoft Office, RTF, and CSV files; and applies
@@ -147,3 +150,7 @@ GPL-3.0-only. Linux Mint and installed packages retain their respective
 licenses. Google Chrome is proprietary and subject to Google's terms; this
 workflow is intended for private/internal images unless separate redistribution
 permission applies. ONLYOFFICE Desktop Editors retains its AGPLv3 license.
+The Microsoft TrueType core fonts are proprietary and subject to Microsoft's
+EULA, which the image builder explicitly accepts. NapOS images containing those
+fonts are intended for private/internal use; obtain legal review before public
+redistribution.

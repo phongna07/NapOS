@@ -75,6 +75,8 @@ Verification requires:
   defaults, with the remaining Mint panel applets preserved.
 - Installer label `Install NapOS`.
 - All selected desktop packages in `filesystem.manifest`.
+- The `ttf-mscorefonts-installer` package plus its Arial and Times New Roman
+  payload files inside the live SquashFS.
 - No Firefox, Firefox locale, Mint Chat, Celluloid, or LibreOffice package in
   `filesystem.manifest`.
 - The resolved `google-chrome-stable` version, executable, desktop launcher,
@@ -96,6 +98,8 @@ Verification requires:
   installed system retains ONLYOFFICE.
 - No `fcitx5-lotus` entry in `filesystem.manifest-remove`, so the installed
   system retains Lotus.
+- No `ttf-mscorefonts-installer` entry in `filesystem.manifest-remove`, so the
+  installed system retains the Microsoft core fonts.
 - An unchanged `filesystem.manifest-remove` from the authenticated Mint ISO.
   Its Firefox locale entries are preserved upstream installer metadata and do
   not indicate that those packages remain in the customized SquashFS.

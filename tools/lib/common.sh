@@ -157,6 +157,40 @@ verify_file_sha256_and_size() {
     [[ "$(sha256_of "$path")" == "$expected_sha256" ]]
 }
 
+verify_installed_conffile() {
+    local root=$1
+    local package=$2
+    local conffile=$3
+    local expected_md5 actual_md5
+
+    [[ -d "$root/var/lib/dpkg" ]] || return 1
+    [[ "$conffile" == /etc/* ]] || return 1
+    [[ -f "$root$conffile" && ! -L "$root$conffile" ]] || return 1
+    expected_md5=$(awk -v wanted_package="$package" -v wanted_path="$conffile" '
+        BEGIN { RS=""; FS="\n" }
+        {
+            package_matches=0
+            installed=0
+            for (i=1; i<=NF; i++) {
+                if ($i == "Package: " wanted_package) package_matches=1
+                if ($i == "Status: install ok installed") installed=1
+            }
+            if (!package_matches || !installed) next
+            for (i=1; i<=NF; i++) {
+                split($i, field, /[[:space:]]+/)
+                if (field[2] == wanted_path && field[3] ~ /^[a-f0-9]{32}$/) {
+                    print field[3]
+                    found=1
+                    exit
+                }
+            }
+        }
+        END { if (!found) exit 1 }
+    ' "$root/var/lib/dpkg/status") || return 1
+    actual_md5=$(md5sum "$root$conffile" | awk '{print $1}') || return 1
+    [[ "$actual_md5" == "$expected_md5" ]]
+}
+
 primary_key_fingerprint() {
     local key_file=$1
     gpg --batch --show-keys --with-colons "$key_file" 2>/dev/null |
