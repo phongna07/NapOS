@@ -175,6 +175,16 @@ validate_cinnamon_desktop_defaults() {
     ' <<<"$dconf_data"
 }
 
+validate_cinnamon_menu_icon_defaults() {
+    local menu_settings=$1
+    local expected_icon=/usr/share/icons/hicolor/scalable/apps/napos-logo.svg
+    jq -e --arg expected_icon "$expected_icon" '
+        .["menu-custom"].default == true and
+        .["menu-icon"].default == $expected_icon and
+        .["menu-icon"].default_icon == $expected_icon
+    ' <<<"$menu_settings" >/dev/null
+}
+
 validate_cinnamon_launcher_defaults() {
     local grouped_window_list=$1
     local panel_launchers=$2
@@ -1099,7 +1109,7 @@ install_packages_and_hooks() {
 validate_customized_rootfs() {
     local package chrome_key_fingerprint chrome_source dconf_data base_reference
     local lotus_key_fingerprint lotus_source apt_conffile apt_package apt_path
-    local grouped_window_list panel_launchers
+    local grouped_window_list panel_launchers menu_settings
     local apt_conf_diff_args=(-qr)
     local apt_preferences_diff_args=(-qr)
     local apt_sources_diff_args=(
@@ -1278,6 +1288,7 @@ validate_customized_rootfs() {
         done
         [[ -f /usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json ]]
         [[ -f /usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json ]]
+        [[ -f /usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json ]]
         grep -q "napos-wallpaper.svg" /etc/dconf/db/local.d/00-napos
         grep -Rqs "Name=Install NapOS" /usr/share/applications
         grep -Rqs "Name\[vi\]=Cài đặt NapOS" /usr/share/applications
@@ -1295,6 +1306,10 @@ validate_customized_rootfs() {
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
     validate_cinnamon_theme_defaults "$dconf_data" ||
         die "Cinnamon theme, pointer, or dark-mode defaults are missing or invalid."
+    menu_settings=$(sudo cat \
+        "$ROOTFS/usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json")
+    validate_cinnamon_menu_icon_defaults "$menu_settings" ||
+        die "Cinnamon menu does not default to the NapOS icon."
     grouped_window_list=$(sudo cat \
         "$ROOTFS/usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json")
     panel_launchers=$(sudo cat \
@@ -1605,7 +1620,7 @@ cmd_verify() {
     local lotus_source_file lotus_key_file lotus_key_fingerprint lotus_version
     local fcitx_environment fcitx_profile fcitx_config lotus_user_unit lotus_server_unit
     local copyq_autostart flameshot_autostart mimeapps mint_mimeapps grouped_window_list
-    local panel_launchers theme_index theme_file
+    local panel_launchers menu_settings theme_index theme_file
     local application_defaults desktop_launcher desktop_listing installer_shortcut
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
@@ -1788,6 +1803,11 @@ cmd_verify() {
     panel_launchers=$(unsquashfs -cat "$temp/filesystem.squashfs" \
         usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json 2>/dev/null) ||
         die "Cinnamon panel-launcher defaults are missing."
+    menu_settings=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json 2>/dev/null) ||
+        die "Cinnamon menu defaults are missing."
+    validate_cinnamon_menu_icon_defaults "$menu_settings" ||
+        die "Cinnamon menu does not default to the NapOS icon."
     validate_cinnamon_launcher_defaults "$grouped_window_list" "$panel_launchers" ||
         die "Cinnamon taskbar launcher defaults are incomplete or incorrectly ordered."
     for desktop_launcher in \

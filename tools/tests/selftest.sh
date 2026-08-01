@@ -854,6 +854,8 @@ eval "$(sed -n '/^validate_cinnamon_panel_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_desktop_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
+eval "$(sed -n '/^validate_cinnamon_menu_icon_defaults()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_launcher_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_desktop_shortcuts()/,/^}/p' \
@@ -908,6 +910,60 @@ expect_failure "Cinnamon theme defaults reject an accompanying desktop-theme cha
 window_theme_defaults=$dconf_defaults$'\n[org/cinnamon/desktop/wm/preferences]\ntheme=\'Windows-10-Dark\''
 expect_failure "Cinnamon theme defaults reject an accompanying window-border change" \
     validate_cinnamon_theme_defaults "$window_theme_defaults"
+
+menu_settings_fixture="$safe_root/menu-settings-override.json"
+cat >"$menu_settings_fixture" <<'EOF'
+{
+    "menu-custom": {"default": true, "override-props": true},
+    "menu-label": {"default": "", "override-props": true},
+    "menu-icon": {
+        "default": "/usr/share/icons/hicolor/scalable/apps/napos-logo.svg",
+        "default_icon": "/usr/share/icons/hicolor/scalable/apps/napos-logo.svg",
+        "override-props": true
+    }
+}
+EOF
+expect_success "Cinnamon menu defaults use the NapOS icon" \
+    validate_cinnamon_menu_icon_defaults "$(cat "$menu_settings_fixture")"
+wrong_menu_icon=$(sed 's|napos-logo.svg|linuxmint-logo-ring-symbolic|g' \
+    "$menu_settings_fixture")
+expect_failure "Cinnamon menu defaults reject the Linux Mint icon" \
+    validate_cinnamon_menu_icon_defaults "$wrong_menu_icon"
+missing_menu_icon='{"menu-custom":{"default":true}}'
+expect_failure "Cinnamon menu defaults require an icon override" \
+    validate_cinnamon_menu_icon_defaults "$missing_menu_icon"
+
+eval "$(sed -n '/^set_cinnamon_menu_icon_default()/,/^}/p' \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+mint_menu_settings="$safe_root/mint-menu-settings-override.json"
+menu_icon_fixture="$safe_root/napos-logo.svg"
+cat >"$mint_menu_settings" <<'EOF'
+{
+    "menu-custom": {"default": false, "override-props": true},
+    "menu-label": {"default": "preserved", "override-props": true},
+    "menu-icon": {
+        "default": "linuxmint-logo-ring-symbolic",
+        "default_icon": "linuxmint-logo-ring-symbolic",
+        "override-props": true
+    }
+}
+EOF
+touch "$menu_icon_fixture"
+expect_success "Branding hook replaces the Cinnamon menu icon default" \
+    set_cinnamon_menu_icon_default "$mint_menu_settings" "$menu_icon_fixture"
+if jq -e --arg icon "$menu_icon_fixture" '
+    .["menu-custom"].default == true and
+    .["menu-icon"].default == $icon and
+    .["menu-icon"].default_icon == $icon and
+    .["menu-label"].default == "preserved"
+' "$mint_menu_settings" >/dev/null; then
+    pass "Cinnamon menu customization preserves unrelated settings"
+else
+    fail "Cinnamon menu customization preserves unrelated settings"
+fi
+expect_failure "Cinnamon menu customization rejects a missing override" \
+    set_cinnamon_menu_icon_default "$safe_root/missing-menu-settings.json" \
+    "$menu_icon_fixture"
 
 grouped_launcher_fixture="$safe_root/grouped-window-list.json"
 panel_launcher_fixture="$safe_root/panel-launchers.json"

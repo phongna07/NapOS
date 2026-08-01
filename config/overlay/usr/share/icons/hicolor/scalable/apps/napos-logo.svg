@@ -1,42 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
-  <defs>
-    <!-- Dark Tech Blue Gradient -->
-    <linearGradient id="napOsBg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0f172a" />
-      <stop offset="50%" stop-color="#1e1b4b" />
-      <stop offset="100%" stop-color="#0284c7" />
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+    <defs>
+        <!-- Background Gradient inspired by the Kindle Icon -->
+        <linearGradient id="skyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#1e5888" />
+            <stop offset="45%" stop-color="#4a95c1" />
+            <stop offset="100%" stop-color="#9bf1fd" />
+        </linearGradient>
+        
+        <!-- Glow filter for stars -->
+        <filter id="glow">
+            <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+            <feMerge>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+        
+        <!-- Star template -->
+        <g id="star">
+            <path d="M 0 -12 Q 0 -2 8 -2 Q 0 -2 0 8 Q 0 -2 -8 -2 Q 0 -2 0 -12 Z" fill="#ffffff" />
+        </g>
+        
+        <!-- Clip path to ensure all elements conform to the rounded corners -->
+        <clipPath id="appIconClip">
+            <rect width="512" height="512" rx="90" />
+        </clipPath>
+    </defs>
 
-  <!-- Background Layer -->
-  <rect width="100%" height="100%" rx="80" fill="url(#napOsBg)" />
+    <g clip-path="url(#appIconClip)">
+        <!-- App Icon Background -->
+        <rect width="512" height="512" fill="url(#skyGradient)" />
 
-  <!-- Original Logo Paths preserved completely -->
-  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Outer Shield / Circle Boundary Accent (Optional floating orbit) -->
-    <circle cx="250" cy="250" r="210" stroke-width="12" stroke-dasharray="800 50" opacity="0.3"/>
-    
-    <!-- Main Letter 'N' Frame -->
-    <!-- Left Stem -->
-    <path d="M 150 360 L 150 140" stroke-width="28"/>
-    <circle cx="150" cy="140" r="14" fill="#FFFFFF"/>
-    
-    <!-- Right Stem -->
-    <path d="M 350 360 L 350 140" stroke-width="28"/>
-    <circle cx="350" cy="360" r="14" fill="#FFFFFF"/>
+        <!-- Starry Sky Background -->
+        <g filter="url(#glow)">
+            <use href="#star" x="90" y="80" transform="scale(0.8)" />
+            <use href="#star" x="250" y="50" transform="scale(1.2)" />
+            <use href="#star" x="420" y="100" transform="scale(0.9)" />
+            <use href="#star" x="150" y="190" transform="scale(0.7)" />
+            <use href="#star" x="380" y="220" transform="scale(1.1)" />
+            <use href="#star" x="110" y="300" transform="scale(0.8)" />
+            <use href="#star" x="460" y="280" transform="scale(0.6)" />
+            <use href="#star" x="210" y="380" transform="scale(0.5)" />
+        </g>
 
-    <!-- Diagonal Crescent Connection (Merging N diagonal with Sleep Moon curve) -->
-    <path d="M 150 160 C 210 210, 240 310, 350 340" stroke-width="28"/>
-    <path d="M 150 160 C 230 180, 290 240, 350 340" stroke-width="14" stroke-dasharray="10 12" opacity="0.6"/>
-
-    <!-- Nap/Sleep "Zzz" Geometric Accents -->
-    <!-- Z1 (Largest, near top right stem) -->
-    <path d="M 380 130 L 415 130 L 380 165 L 415 165" stroke-width="10"/>
-    
-    <!-- Z2 (Medium) -->
-    <path d="M 405 90 L 430 90 L 405 115 L 430 115" stroke-width="8"/>
-    
-    <!-- Z3 (Smallest) -->
-    <path d="M 425 60 L 440 60 L 425 75 L 440 75" stroke-width="6"/>
-  </g>
+        <!-- Black Silhouette Ground -->
+        <path d="M 0 450 Q 150 390 320 440 T 512 420 L 512 512 L 0 512 Z" fill="#000000" />
+        
+        <!-- Sleepy Z Icons -->
+        <g stroke="#000000" stroke-linecap="round" stroke-linejoin="round" fill="none">
+            <!-- Small Z -->
+            <g transform="translate(140, 340) rotate(-10)">
+                <path d="M 0 0 L 35 0 L 0 45 L 35 45" stroke-width="12" />
+            </g>
+            
+            <!-- Medium Z -->
+            <g transform="translate(220, 220) rotate(5)">
+                <path d="M 0 0 L 55 0 L 0 70 L 55 70" stroke-width="18" />
+            </g>
+            
+            <!-- Large Z -->
+            <g transform="translate(320, 70) rotate(-5)">
+                <path d="M 0 0 L 90 0 L 0 115 L 90 115" stroke-width="26" />
+            </g>
+        </g>
+    </g>
 </svg>

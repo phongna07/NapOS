@@ -81,6 +81,7 @@
     </linearGradient>
   </defs>
 
+  <g transform="rotate(180 1920 1080)">
   <rect width="3840" height="2160" fill="url(#bgGlow)"/>
   <ellipse cx="870" cy="1410" rx="760" ry="600" fill="#040b20" opacity="0.72"/>
 
@@ -364,4 +365,5 @@
 <circle cx="1220" cy="1650" r="180" fill="#00eaff" opacity="0.1" filter="url(#softGlow)"/>
 <circle cx="2540" cy="430" r="120" fill="#5d35ff" opacity="0.1" filter="url(#softGlow)"/>
 <rect width="3840" height="2160" filter="url(#grain)" opacity="0.5"/>
+  </g>
 </svg>

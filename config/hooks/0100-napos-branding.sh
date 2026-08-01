@@ -326,6 +326,51 @@ PY
     rm -f -- "$temporary"
 }
 
+set_cinnamon_menu_icon_default() {
+    local settings_override=$1
+    local icon_path=$2
+    local temporary
+    [[ -f "$settings_override" ]] || {
+        printf 'Required Cinnamon menu override is missing: %s\n' "$settings_override" >&2
+        return 1
+    }
+    [[ -f "$icon_path" ]] || {
+        printf 'Required Cinnamon menu icon is missing: %s\n' "$icon_path" >&2
+        return 1
+    }
+    temporary=$(mktemp)
+    if ! python3 - "$settings_override" "$icon_path" >"$temporary" <<'PY'
+import json
+import sys
+
+settings_path = sys.argv[1]
+icon_path = sys.argv[2]
+
+with open(settings_path, encoding="utf-8") as settings_file:
+    settings = json.load(settings_file)
+
+for setting_name in ("menu-custom", "menu-icon"):
+    if setting_name not in settings or not isinstance(settings[setting_name], dict):
+        raise SystemExit(f"Cinnamon menu setting is missing: {setting_name}")
+
+settings["menu-custom"]["default"] = True
+settings["menu-icon"]["default"] = icon_path
+settings["menu-icon"]["default_icon"] = icon_path
+json.dump(settings, sys.stdout, indent=4, ensure_ascii=False)
+sys.stdout.write("\n")
+PY
+    then
+        rm -f -- "$temporary"
+        return 1
+    fi
+    cat "$temporary" >"$settings_override"
+    rm -f -- "$temporary"
+}
+
+menu_icon=/usr/share/icons/hicolor/scalable/apps/napos-logo.svg
+menu_settings_override=/usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json
+set_cinnamon_menu_icon_default "$menu_settings_override" "$menu_icon"
+
 taskbar_launchers=(
     nemo.desktop
     google-chrome.desktop
