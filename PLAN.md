@@ -7,8 +7,10 @@
 - [x] remove celluloid media player
 - [x] Chrome
 - [ ] fcitx5-lotus
-- [ ] OBS Studio
+- [ ] ttf-mscorefonts-installer
 - [x] OnlyOffice
+- [ ] Okular
+- [ ] unrar, p7zip-full
 - [ ] Zalo appimage
 - [ ] zsh shell
 - [x] config vlc media player as the default
