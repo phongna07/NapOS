@@ -79,10 +79,100 @@ dconf update
 printf '[NapOS] Configuring default applications...\n'
 celluloid_desktop=io.github.celluloid_player.Celluloid.desktop
 vlc_desktop=vlc.desktop
+onlyoffice_desktop=onlyoffice-desktopeditors.desktop
 [[ -f "/usr/share/applications/$vlc_desktop" ]] || {
     printf 'Required VLC desktop launcher is missing: %s\n' "/usr/share/applications/$vlc_desktop" >&2
     exit 1
 }
+[[ -f "/usr/share/applications/$onlyoffice_desktop" ]] || {
+    printf 'Required ONLYOFFICE desktop launcher is missing: %s\n' \
+        "/usr/share/applications/$onlyoffice_desktop" >&2
+    exit 1
+}
+
+set_mime_default() {
+    local mimeapps_file=$1
+    local mime_type=$2
+    local desktop=$3
+    local temporary
+    temporary=$(mktemp)
+    awk -v wanted="$mime_type" -v desktop="$desktop" '
+        BEGIN { in_defaults=0; found_defaults=0; written=0 }
+        /^\[Default Applications\]$/ {
+            if (in_defaults && !written) {
+                print wanted "=" desktop
+                written=1
+            }
+            in_defaults=1
+            found_defaults=1
+            print
+            next
+        }
+        /^\[/ {
+            if (in_defaults && !written) {
+                print wanted "=" desktop
+                written=1
+            }
+            in_defaults=0
+            print
+            next
+        }
+        in_defaults && index($0, wanted "=") == 1 {
+            if (!written) {
+                print wanted "=" desktop
+                written=1
+            }
+            next
+        }
+        { print }
+        END {
+            if (in_defaults && !written) {
+                print wanted "=" desktop
+            } else if (!found_defaults) {
+                if (NR > 0) print ""
+                print "[Default Applications]"
+                print wanted "=" desktop
+            }
+        }
+    ' "$mimeapps_file" >"$temporary"
+    cat "$temporary" >"$mimeapps_file"
+    rm -f -- "$temporary"
+}
+
+office_mime_types=(
+    application/msword
+    application/msword-template
+    application/vnd.ms-word.document.macroEnabled.12
+    application/vnd.ms-word.template.macroEnabled.12
+    application/vnd.openxmlformats-officedocument.wordprocessingml.document
+    application/vnd.openxmlformats-officedocument.wordprocessingml.template
+    application/vnd.ms-excel
+    application/vnd.ms-excel.sheet.macroEnabled.12
+    application/vnd.ms-excel.sheet.binary.macroEnabled.12
+    application/vnd.ms-excel.template.macroEnabled.12
+    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    application/vnd.openxmlformats-officedocument.spreadsheetml.template
+    application/vnd.ms-powerpoint
+    application/vnd.ms-powerpoint.presentation.macroEnabled.12
+    application/vnd.ms-powerpoint.slideshow.macroEnabled.12
+    application/vnd.ms-powerpoint.template.macroEnabled.12
+    application/vnd.openxmlformats-officedocument.presentationml.presentation
+    application/vnd.openxmlformats-officedocument.presentationml.slideshow
+    application/vnd.openxmlformats-officedocument.presentationml.template
+    application/rtf
+    text/rtf
+    application/csv
+    text/csv
+    text/comma-separated-values
+    text/x-comma-separated-values
+)
+onlyoffice_launcher="/usr/share/applications/$onlyoffice_desktop"
+for mime_type in "${office_mime_types[@]}"; do
+    mime_list=$(grep -m1 '^MimeType=' "$onlyoffice_launcher")
+    if [[ ";${mime_list#MimeType=}" != *";$mime_type;"* ]]; then
+        sed -i "s#^MimeType=#MimeType=$mime_type;#" "$onlyoffice_launcher"
+    fi
+done
 mimeapps_files=(
     /usr/share/applications/mimeapps.list
     /usr/share/ubuntu-system-adjustments/mimeapps.list
@@ -96,10 +186,19 @@ for mimeapps_file in "${mimeapps_files[@]}"; do
         -e 's/=firefox\.desktop$/=google-chrome.desktop/' \
         -e 's/io\.github\.celluloid_player\.Celluloid\.desktop/vlc.desktop/g' \
         "$mimeapps_file"
+    for mime_type in "${office_mime_types[@]}"; do
+        set_mime_default "$mimeapps_file" "$mime_type" "$onlyoffice_desktop"
+    done
     if grep -Fq "$celluloid_desktop" "$mimeapps_file"; then
         printf 'Celluloid remains assigned in MIME application policy: %s\n' "$mimeapps_file" >&2
         exit 1
     fi
+    for mime_type in "${office_mime_types[@]}"; do
+        grep -Fqx "$mime_type=$onlyoffice_desktop" "$mimeapps_file" || {
+            printf 'ONLYOFFICE is not the default for %s in %s\n' "$mime_type" "$mimeapps_file" >&2
+            exit 1
+        }
+    done
 done
 
 launcher_schemas=(

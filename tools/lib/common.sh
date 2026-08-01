@@ -14,6 +14,7 @@ source "$PROJECT_ROOT/config/source.lock"
 CACHE_DIR="$PROJECT_ROOT/cache"
 DOWNLOAD_DIR="$CACHE_DIR/downloads/$BASE_ISO_SHA256"
 CHROME_DOWNLOAD_DIR="$CACHE_DIR/downloads/google-chrome"
+ONLYOFFICE_DOWNLOAD_DIR="$CACHE_DIR/downloads/onlyoffice"
 BASE_CACHE_DIR="$CACHE_DIR/base/$BASE_ISO_SHA256"
 WORK_DIR="$PROJECT_ROOT/work"
 ISO_TREE="$WORK_DIR/iso-tree"
@@ -24,7 +25,7 @@ CONFIG_DIR="$PROJECT_ROOT/config"
 
 # These shared readonly values are consumed by scripts that source this library.
 # shellcheck disable=SC2034
-readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR CHROME_DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
+readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR CHROME_DOWNLOAD_DIR ONLYOFFICE_DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
 # shellcheck disable=SC2034
 readonly ISO_TREE ROOTFS META_DIR DIST_DIR CONFIG_DIR
 
@@ -75,6 +76,17 @@ validate_config() {
         die "Invalid Google Linux signing fingerprint."
     [[ "$GOOGLE_CHROME_INSTALLED_APT_URI" == "https://dl.google.com/linux/chrome-stable/deb/" ]] ||
         die "Unexpected installed Google Chrome APT URI."
+    [[ "$ONLYOFFICE_PACKAGE" == "onlyoffice-desktopeditors" ]] || die "Unexpected ONLYOFFICE package name."
+    [[ "$ONLYOFFICE_ARCH" == "amd64" ]] || die "ONLYOFFICE input must target amd64."
+    [[ "$ONLYOFFICE_DEB_URL" == "https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb" ]] ||
+        die "Unexpected ONLYOFFICE download URL."
+    [[ "$ONLYOFFICE_APT_URL" == "https://download.onlyoffice.com/repo/debian" ]] ||
+        die "Unexpected ONLYOFFICE APT metadata URL."
+    [[ "$ONLYOFFICE_APT_SUITE" == "squeeze" ]] || die "Unexpected ONLYOFFICE APT suite."
+    [[ "$ONLYOFFICE_SIGNING_KEY_URL" == "https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE" ]] ||
+        die "Unexpected ONLYOFFICE signing-key URL."
+    [[ "$(trim_fingerprint "$ONLYOFFICE_SIGNING_FINGERPRINT")" =~ ^[A-F0-9]{40}$ ]] ||
+        die "Invalid ONLYOFFICE signing fingerprint."
     [[ -f "$CONFIG_DIR/packages.txt" ]] || die "Missing package list: $CONFIG_DIR/packages.txt"
     [[ -f "$CONFIG_DIR/packages-remove.txt" ]] ||
         die "Missing package removal list: $CONFIG_DIR/packages-remove.txt"
@@ -176,6 +188,63 @@ chrome_package_metadata() {
     ' "$packages_file"
 }
 
+onlyoffice_package_metadata() {
+    local packages_file=$1
+    local version filename sha256 size
+    local selected_version="" selected_filename="" selected_sha256="" selected_size=""
+
+    while IFS=$'\t' read -r version filename sha256 size; do
+        [[ "$version" != "__INVALID__" ]] || return 1
+        if [[ -z "$selected_version" ]] || dpkg --compare-versions "$version" gt "$selected_version"; then
+            selected_version=$version
+            selected_filename=$filename
+            selected_sha256=$sha256
+            selected_size=$size
+        fi
+    done < <(
+        awk -v wanted_package="$ONLYOFFICE_PACKAGE" -v wanted_arch="$ONLYOFFICE_ARCH" '
+            BEGIN { RS=""; FS="\n" }
+            {
+                delete value
+                for (i=1; i<=NF; i++) {
+                    separator=index($i, ": ")
+                    if (separator > 0) {
+                        key=substr($i, 1, separator-1)
+                        value[key]=substr($i, separator+2)
+                    }
+                }
+                if (value["Package"] == wanted_package && value["Architecture"] == wanted_arch) {
+                    if (value["Version"] == "" || value["Filename"] == "" ||
+                        value["SHA256"] !~ /^[a-f0-9]{64}$/ || value["Size"] !~ /^[0-9]+$/) {
+                        print "__INVALID__"
+                    } else {
+                        print value["Version"] "\t" value["Filename"] "\t" value["SHA256"] "\t" value["Size"]
+                    }
+                }
+            }
+        ' "$packages_file"
+    )
+
+    [[ -n "$selected_version" ]] || return 1
+    printf '%s\t%s\t%s\t%s\n' \
+        "$selected_version" "$selected_filename" "$selected_sha256" "$selected_size"
+}
+
+validate_onlyoffice_deb() {
+    local path=$1
+    local expected_version=$2
+    local expected_sha256=$3
+    local expected_size=$4
+    local package version architecture
+    verify_file_sha256_and_size "$path" "$expected_sha256" "$expected_size" || return 1
+    package=$(dpkg-deb -f "$path" Package 2>/dev/null) || return 1
+    version=$(dpkg-deb -f "$path" Version 2>/dev/null) || return 1
+    architecture=$(dpkg-deb -f "$path" Architecture 2>/dev/null) || return 1
+    [[ "$package" == "$ONLYOFFICE_PACKAGE" ]] || return 1
+    [[ "$version" == "$expected_version" ]] || return 1
+    [[ "$architecture" == "$ONLYOFFICE_ARCH" ]]
+}
+
 validate_chrome_apt_source() {
     local source_file=$1
     [[ -f "$source_file" ]] || return 1
@@ -216,7 +285,7 @@ git_dirty() {
 }
 
 build_id() {
-    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|$(git_revision)" |
+    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|${ONLYOFFICE_DEB_SHA256:-unresolved}|$(git_revision)" |
         sha256sum | cut -c1-16
 }
 

@@ -27,6 +27,9 @@ cp ~/napos/dist/NapOS-0.1.0-dev-cinnamon-amd64.iso \
 5. Confirm applications, Google Chrome as the default browser, no Firefox or
    Mint Chat launcher, DNS, `apt update`, English locale,
    Bangkok timezone, reboot, and shutdown.
+6. Open representative DOCX, XLSX, PPTX, DOCM, XLSB, PPSX, RTF, and CSV files
+   from the file manager and confirm each launches in ONLYOFFICE. Confirm PDF,
+   ODT, ODS, and ODP defaults were not reassigned to ONLYOFFICE.
 
 ## UEFI test
 
@@ -35,8 +38,8 @@ Create a second disposable VM, or erase the first virtual disk:
 1. Enable EFI and keep Secure Boot disabled.
 2. Repeat the live boot and installation.
 3. Eject the ISO and confirm the installed system boots through EFI.
-4. Run the same application, package, locale, network, reboot, and shutdown
-   checks.
+4. Run the same application, office-file association, package, locale, network,
+   reboot, and shutdown checks.
 
 ## Release gate
 

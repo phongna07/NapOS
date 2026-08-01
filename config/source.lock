@@ -12,3 +12,14 @@ GOOGLE_CHROME_APT_URL="https://dl.google.com/linux/chrome/deb"
 GOOGLE_CHROME_SIGNING_KEY_URL="https://dl.google.com/linux/linux_signing_key.pub"
 GOOGLE_CHROME_SIGNING_FINGERPRINT="EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796"
 GOOGLE_CHROME_INSTALLED_APT_URI="https://dl.google.com/linux/chrome-stable/deb/"
+
+# Authenticated ONLYOFFICE Desktop Editors stable input. The package version
+# and checksum are resolved from ONLYOFFICE's signed APT metadata for every
+# fetch, while the package itself comes from the official website download.
+ONLYOFFICE_PACKAGE="onlyoffice-desktopeditors"
+ONLYOFFICE_ARCH="amd64"
+ONLYOFFICE_DEB_URL="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb"
+ONLYOFFICE_APT_URL="https://download.onlyoffice.com/repo/debian"
+ONLYOFFICE_APT_SUITE="squeeze"
+ONLYOFFICE_SIGNING_KEY_URL="https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE"
+ONLYOFFICE_SIGNING_FINGERPRINT="E09CA29F6E178040EF22B4098320CA65CB2DE8E5"

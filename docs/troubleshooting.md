@@ -34,16 +34,16 @@ password on a command line or store it in this repository.
 
 Do not bypass authentication. Retry the network operation. If isolated GPG
 state is damaged, run `make clean-cache` and `make fetch`. The workflow obtains
-Mint's key from keys.openpgp.org and Google's key from its official Linux
-endpoint, then verifies both committed primary-key fingerprints.
+Mint's key from keys.openpgp.org and application-vendor keys from their official
+endpoints, then verifies all committed primary-key fingerprints.
 
 ## ISO checksum mismatch
 
 An existing invalid ISO is renamed with an `.invalid.TIMESTAMP` suffix before
 redownload. Keep it only if you need to investigate transport or disk errors.
-Never edit `config/source.lock` to match an untrusted file. Chrome package
-checksum or identity mismatches are quarantined the same way and retried
-against freshly authenticated Google repository metadata.
+Never edit `config/source.lock` to match an untrusted file. Chrome and
+ONLYOFFICE package checksum or identity mismatches are quarantined the same way
+and retried against freshly authenticated vendor repository metadata.
 
 ## Interrupted build or busy mount
 
@@ -77,7 +77,8 @@ authenticated base, or `make clean-cache` to recover all build storage.
 ## Stale or unwanted cache
 
 `make fetch` reuses only an ISO matching the signed manifest and committed hash,
-and only a Chrome `.deb` matching the latest signed Google package metadata.
+and only Chrome and ONLYOFFICE `.deb` files matching the latest signed vendor
+package metadata.
 Use `make clean-cache` only when no build or fetch is running; it checks locks
 and mount descendants before removing authenticated downloads, the immutable
 base cache, and isolated GPG state. The next `make fetch` downloads and verifies

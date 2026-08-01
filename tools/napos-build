@@ -18,6 +18,11 @@ CHROME_VERSION=""
 CHROME_DEB_SHA256=""
 CHROME_DEB_SIZE=""
 CHROME_REPOSITORY_PACKAGE_PATH=""
+ONLYOFFICE_DEB_PATH=""
+ONLYOFFICE_VERSION=""
+ONLYOFFICE_DEB_SHA256=""
+ONLYOFFICE_DEB_SIZE=""
+ONLYOFFICE_REPOSITORY_PACKAGE_PATH=""
 
 cleanup_temp_paths() {
     local path
@@ -73,7 +78,7 @@ Usage:
 
 Preferred interface:
   make doctor   Validate WSL2, tools, storage, sudo, and mounts
-  make fetch    Authenticate and cache Linux Mint plus current Chrome stable
+  make fetch    Authenticate and cache Linux Mint, Chrome, and ONLYOFFICE
   make dev      Build and verify an LZ4 development ISO
   make release  Build and verify an XZ release ISO
   make verify ISO=dist/NapOS-...iso
@@ -129,7 +134,7 @@ check_disk_space() {
 
 check_tools() {
     local command
-    local commands=(awk bash chroot cmp curl cut df diff dpkg-deb du file find findmnt flock git gpg head jq make md5sum mktemp mount mountpoint mksquashfs mv readlink realpath rm rsync sed sha256sum shellcheck sort stat sudo sync tee unsquashfs xargs xorriso)
+    local commands=(awk bash chroot cmp curl cut df diff dpkg dpkg-deb du file find findmnt flock git gpg head jq make md5sum mktemp mount mountpoint mksquashfs mv readlink realpath rm rsync sed sha256sum shellcheck sort stat sudo sync tee unsquashfs xargs xorriso)
     for command in "${commands[@]}"; do
         command -v "$command" >/dev/null 2>&1 || {
             warn "Missing command: $command"
@@ -377,6 +382,100 @@ fetch_google_chrome() {
     die "Unable to authenticate a consistent Google Chrome stable package after 3 attempts."
 }
 
+quarantine_onlyoffice_file() {
+    local path=$1
+    local quarantine
+    [[ -f "$path" ]] || return 0
+    quarantine="${path}.invalid.$(date -u +%Y%m%dT%H%M%SZ)"
+    mv -- "$path" "$quarantine"
+    warn "Quarantined an invalid ONLYOFFICE package at $quarantine"
+}
+
+fetch_onlyoffice_deb() {
+    local destination=$1
+    local expected_version=$2
+    local expected_sha256=$3
+    local expected_size=$4
+    local part="${destination}.part"
+
+    if [[ -f "$destination" ]]; then
+        if validate_onlyoffice_deb "$destination" "$expected_version" "$expected_sha256" "$expected_size"; then
+            ok "Using authenticated cached ONLYOFFICE $expected_version."
+            return 0
+        fi
+        quarantine_onlyoffice_file "$destination"
+    fi
+
+    mkdir -p "$(dirname "$destination")"
+    if [[ -f "$part" ]]; then
+        quarantine_onlyoffice_file "$part"
+    fi
+    log "Downloading ONLYOFFICE Desktop Editors $expected_version..."
+    download_transient "$ONLYOFFICE_DEB_URL" "$part" || return 1
+    if ! validate_onlyoffice_deb "$part" "$expected_version" "$expected_sha256" "$expected_size"; then
+        quarantine_onlyoffice_file "$part"
+        return 1
+    fi
+    mv -- "$part" "$destination"
+    ok "ONLYOFFICE .deb matches signed repository metadata."
+}
+
+fetch_onlyoffice_attempt() {
+    local temp gnupg_home key_file inrelease packages status_file
+    local actual_primary valid_primary release_metadata packages_sha256 packages_size
+    local package_metadata package_filename destination packages_path
+
+    temp=$(with_temp_dir)
+    TEMP_PATHS+=("$temp")
+    gnupg_home="$temp/gnupg"
+    key_file="$temp/onlyoffice-signing-key.asc"
+    inrelease="$temp/InRelease"
+    packages="$temp/Packages"
+    status_file="$temp/gpg.status"
+    packages_path="main/binary-$ONLYOFFICE_ARCH/Packages"
+    mkdir -m 0700 "$gnupg_home"
+
+    download_transient "$ONLYOFFICE_SIGNING_KEY_URL" "$key_file" || return 1
+    actual_primary=$(primary_key_fingerprint "$key_file") || return 1
+    [[ "$(trim_fingerprint "$actual_primary")" == "$(trim_fingerprint "$ONLYOFFICE_SIGNING_FINGERPRINT")" ]] || return 1
+    gpg --homedir "$gnupg_home" --batch --import "$key_file" >/dev/null 2>&1 || return 1
+
+    download_transient "$ONLYOFFICE_APT_URL/dists/$ONLYOFFICE_APT_SUITE/InRelease" "$inrelease" || return 1
+    gpg --homedir "$gnupg_home" --batch --status-fd 1 --verify "$inrelease" \
+        >"$status_file" 2>/dev/null || return 1
+    valid_primary=$(awk '$2 == "VALIDSIG" { print $NF; exit }' "$status_file")
+    [[ "$(trim_fingerprint "$valid_primary")" == "$(trim_fingerprint "$ONLYOFFICE_SIGNING_FINGERPRINT")" ]] || return 1
+
+    release_metadata=$(release_file_metadata "$inrelease" "$packages_path") || return 1
+    IFS=$'\t' read -r packages_sha256 packages_size <<<"$release_metadata"
+    download_transient "$ONLYOFFICE_APT_URL/dists/$ONLYOFFICE_APT_SUITE/$packages_path" "$packages" || return 1
+    verify_file_sha256_and_size "$packages" "$packages_sha256" "$packages_size" || return 1
+
+    package_metadata=$(onlyoffice_package_metadata "$packages") || return 1
+    IFS=$'\t' read -r ONLYOFFICE_VERSION package_filename ONLYOFFICE_DEB_SHA256 ONLYOFFICE_DEB_SIZE \
+        <<<"$package_metadata"
+    [[ "$package_filename" == pool/main/o/onlyoffice-desktopeditors/*.deb ]] || return 1
+    destination="$ONLYOFFICE_DOWNLOAD_DIR/$ONLYOFFICE_DEB_SHA256/$(basename "$package_filename")"
+    fetch_onlyoffice_deb "$destination" "$ONLYOFFICE_VERSION" "$ONLYOFFICE_DEB_SHA256" \
+        "$ONLYOFFICE_DEB_SIZE" || return 1
+
+    ONLYOFFICE_DEB_PATH=$destination
+    ONLYOFFICE_REPOSITORY_PACKAGE_PATH=$package_filename
+    ok "Authenticated ONLYOFFICE signing fingerprint: $actual_primary"
+    ok "Resolved ONLYOFFICE Desktop Editors: $ONLYOFFICE_VERSION"
+}
+
+fetch_onlyoffice() {
+    local attempt
+    for attempt in 1 2 3; do
+        if fetch_onlyoffice_attempt; then
+            return 0
+        fi
+        warn "ONLYOFFICE metadata/package resolution attempt $attempt of 3 failed."
+    done
+    die "Unable to authenticate a consistent ONLYOFFICE stable package after 3 attempts."
+}
+
 cmd_fetch() {
     local manifest="$DOWNLOAD_DIR/sha256sum.txt"
     local signature="$DOWNLOAD_DIR/sha256sum.txt.gpg"
@@ -408,6 +507,7 @@ cmd_fetch() {
     ok "Authenticated base ISO SHA-256: $actual"
     ok "Authenticated base ISO: $iso"
     fetch_google_chrome
+    fetch_onlyoffice
 }
 
 base_iso_path() {
@@ -534,12 +634,14 @@ mount_chroot() {
 install_packages_and_hooks() {
     local hook hook_name
     [[ -f "$CHROME_DEB_PATH" ]] || die "Authenticated Google Chrome package is unavailable."
+    [[ -f "$ONLYOFFICE_DEB_PATH" ]] || die "Authenticated ONLYOFFICE package is unavailable."
     save_and_enable_dns
     printf '#!/bin/sh\nexit 101\n' | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" >/dev/null
     sudo chmod 0755 "$ROOTFS/usr/sbin/policy-rc.d"
     sudo install -m 0644 "$CONFIG_DIR/packages.txt" "$ROOTFS/tmp/napos-packages.txt"
     sudo install -m 0644 "$CONFIG_DIR/packages-remove.txt" "$ROOTFS/tmp/napos-packages-remove.txt"
     sudo install -m 0644 "$CHROME_DEB_PATH" "$ROOTFS/tmp/napos-google-chrome.deb"
+    sudo install -m 0644 "$ONLYOFFICE_DEB_PATH" "$ROOTFS/tmp/napos-onlyoffice.deb"
     sudo mkdir -p "$ROOTFS/tmp/napos-hooks"
     if compgen -G "$CONFIG_DIR/hooks/*.sh" >/dev/null; then
         sudo cp "$CONFIG_DIR"/hooks/*.sh "$ROOTFS/tmp/napos-hooks/"
@@ -554,6 +656,7 @@ install_packages_and_hooks() {
             sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/napos-packages.txt |
                 xargs -r apt-get install -y --no-install-recommends
             apt-get install -y --no-install-recommends /tmp/napos-google-chrome.deb
+            apt-get install -y --no-install-recommends /tmp/napos-onlyoffice.deb
             sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/napos-packages-remove.txt |
                 xargs -r apt-get purge -y --
         '
@@ -603,6 +706,10 @@ validate_customized_rootfs() {
         [[ -x /usr/bin/google-chrome-stable ]]
         [[ -f /usr/share/applications/google-chrome.desktop ]]
         [[ -f /usr/share/applications/vlc.desktop ]]
+        [[ -x /usr/bin/onlyoffice-desktopeditors ]]
+        [[ -f /usr/share/applications/onlyoffice-desktopeditors.desktop ]]
+        [[ ! -e /etc/apt/sources.list.d/onlyoffice.list ]]
+        [[ ! -e /etc/apt/sources.list.d/onlyoffice.sources ]]
         [[ ! -e /usr/bin/firefox ]]
         [[ ! -e /usr/share/applications/firefox.desktop ]]
         [[ ! -e /var/lib/flatpak/app/com.google.Chrome ]]
@@ -619,6 +726,37 @@ validate_customized_rootfs() {
             grep -qx "video/mp4=vlc.desktop" "$mimeapps"
             grep -qx "video/x-matroska=vlc.desktop" "$mimeapps"
             grep -qx "x-content/video-dvd=vlc.desktop" "$mimeapps"
+            for office_mime in \
+                application/msword \
+                application/msword-template \
+                application/vnd.ms-word.document.macroEnabled.12 \
+                application/vnd.ms-word.template.macroEnabled.12 \
+                application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+                application/vnd.openxmlformats-officedocument.wordprocessingml.template \
+                application/vnd.ms-excel \
+                application/vnd.ms-excel.sheet.macroEnabled.12 \
+                application/vnd.ms-excel.sheet.binary.macroEnabled.12 \
+                application/vnd.ms-excel.template.macroEnabled.12 \
+                application/vnd.openxmlformats-officedocument.spreadsheetml.sheet \
+                application/vnd.openxmlformats-officedocument.spreadsheetml.template \
+                application/vnd.ms-powerpoint \
+                application/vnd.ms-powerpoint.presentation.macroEnabled.12 \
+                application/vnd.ms-powerpoint.slideshow.macroEnabled.12 \
+                application/vnd.ms-powerpoint.template.macroEnabled.12 \
+                application/vnd.openxmlformats-officedocument.presentationml.presentation \
+                application/vnd.openxmlformats-officedocument.presentationml.slideshow \
+                application/vnd.openxmlformats-officedocument.presentationml.template \
+                application/rtf text/rtf application/csv text/csv \
+                text/comma-separated-values text/x-comma-separated-values; do
+                grep -Fqx "$office_mime=onlyoffice-desktopeditors.desktop" "$mimeapps"
+                onlyoffice_mime_list=$(grep -m1 "^MimeType=" \
+                    /usr/share/applications/onlyoffice-desktopeditors.desktop)
+                [[ ";${onlyoffice_mime_list#MimeType=}" == *";$office_mime;"* ]]
+            done
+            grep -qx "application/pdf=xreader.desktop" "$mimeapps"
+            grep -qx "application/vnd.oasis.opendocument.text=libreoffice-writer.desktop" "$mimeapps"
+            grep -qx "application/vnd.oasis.opendocument.spreadsheet=libreoffice-calc.desktop" "$mimeapps"
+            grep -qx "application/vnd.oasis.opendocument.presentation=libreoffice-impress.desktop" "$mimeapps"
             ! grep -q "=firefox.desktop$" "$mimeapps"
             ! grep -Fq "io.github.celluloid_player.Celluloid.desktop" "$mimeapps"
         done
@@ -658,6 +796,10 @@ validate_customized_rootfs() {
         die "Expected package is not installed: $GOOGLE_CHROME_PACKAGE"
     [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${Version}' "$GOOGLE_CHROME_PACKAGE")" == "$CHROME_VERSION" ]] ||
         die "Installed Google Chrome version differs from authenticated package metadata."
+    [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$ONLYOFFICE_PACKAGE")" == ii* ]] ||
+        die "Expected package is not installed: $ONLYOFFICE_PACKAGE"
+    [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${Version}' "$ONLYOFFICE_PACKAGE")" == "$ONLYOFFICE_VERSION" ]] ||
+        die "Installed ONLYOFFICE version differs from authenticated package metadata."
     if sudo grep -Rqs --exclude='napos-build' 'Napos' \
         "$ROOTFS/etc/napos-release" "$ROOTFS/usr/lib/os-release" \
         "$ROOTFS/usr/share/applications"; then
@@ -671,7 +813,8 @@ clean_chroot() {
     sudo chroot "$ROOTFS" /bin/bash -euxc '
         apt-get clean
         rm -rf /var/lib/apt/lists/* /tmp/napos-hooks /tmp/napos-packages.txt \
-            /tmp/napos-packages-remove.txt /tmp/napos-google-chrome.deb
+            /tmp/napos-packages-remove.txt /tmp/napos-google-chrome.deb \
+            /tmp/napos-onlyoffice.deb
         rm -f /usr/sbin/policy-rc.d /var/lib/dbus/machine-id
         : > /etc/machine-id
     '
@@ -754,6 +897,15 @@ write_build_info() {
         --arg chrome_repository "$GOOGLE_CHROME_APT_URL" \
         --arg chrome_repository_package_path "$CHROME_REPOSITORY_PACKAGE_PATH" \
         --arg chrome_signing_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT" \
+        --arg onlyoffice_package "$ONLYOFFICE_PACKAGE" \
+        --arg onlyoffice_version "$ONLYOFFICE_VERSION" \
+        --arg onlyoffice_architecture "$ONLYOFFICE_ARCH" \
+        --arg onlyoffice_url "$ONLYOFFICE_DEB_URL" \
+        --arg onlyoffice_sha256 "$ONLYOFFICE_DEB_SHA256" \
+        --arg onlyoffice_repository "$ONLYOFFICE_APT_URL" \
+        --arg onlyoffice_repository_suite "$ONLYOFFICE_APT_SUITE" \
+        --arg onlyoffice_repository_package_path "$ONLYOFFICE_REPOSITORY_PACKAGE_PATH" \
+        --arg onlyoffice_signing_fingerprint "$ONLYOFFICE_SIGNING_FINGERPRINT" \
         --arg timestamp "$BUILD_TIMESTAMP" \
         --arg xorriso_version "$(xorriso -version 2>&1 | head -n1)" \
         --arg squashfs_version "$(unsquashfs -version 2>&1 | head -n1)" \
@@ -766,7 +918,12 @@ write_build_info() {
                   google_chrome:{package:$chrome_package, version:$chrome_version,
                     architecture:$chrome_architecture, url:$chrome_url, sha256:$chrome_sha256,
                     repository:$chrome_repository, repository_package_path:$chrome_repository_package_path,
-                    signing_fingerprint:$chrome_signing_fingerprint}},
+                    signing_fingerprint:$chrome_signing_fingerprint},
+                  onlyoffice:{package:$onlyoffice_package, version:$onlyoffice_version,
+                    architecture:$onlyoffice_architecture, url:$onlyoffice_url, sha256:$onlyoffice_sha256,
+                    repository:$onlyoffice_repository, repository_suite:$onlyoffice_repository_suite,
+                    repository_package_path:$onlyoffice_repository_package_path,
+                    signing_fingerprint:$onlyoffice_signing_fingerprint}},
           built_at:$timestamp, tools:{xorriso:$xorriso_version, squashfs:$squashfs_version},
           duration_seconds:$duration_seconds, byte_reproducible:false}' >"$info"
 }
@@ -834,6 +991,7 @@ cmd_verify() {
     local package napos_release os_release timezone installer locale_data dconf_data
     local squashfs_report compression expected_compression base_iso
     local build_info chrome_source_file chrome_key_file chrome_key_fingerprint chrome_version
+    local onlyoffice_version onlyoffice_launcher office_mime
     local mimeapps mint_mimeapps grouped_window_list panel_launchers application_defaults launcher_defaults
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
@@ -896,8 +1054,19 @@ cmd_verify() {
         die "Google Chrome desktop launcher is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/vlc.desktop >/dev/null 2>&1 ||
         die "VLC desktop launcher is missing."
+    onlyoffice_launcher=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/applications/onlyoffice-desktopeditors.desktop 2>/dev/null) ||
+        die "ONLYOFFICE desktop launcher is missing."
+    if unsquashfs -cat "$temp/filesystem.squashfs" etc/apt/sources.list.d/onlyoffice.list \
+        >/dev/null 2>&1 ||
+        unsquashfs -cat "$temp/filesystem.squashfs" etc/apt/sources.list.d/onlyoffice.sources \
+            >/dev/null 2>&1; then
+        die "A persistent ONLYOFFICE APT source is present."
+    fi
     unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/google-chrome-stable 2>/dev/null |
         grep -q 'usr/bin/google-chrome-stable' || die "Google Chrome executable is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/onlyoffice-desktopeditors 2>/dev/null |
+        grep -q 'usr/bin/onlyoffice-desktopeditors' || die "ONLYOFFICE executable is missing."
     if unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/firefox.desktop \
         >/dev/null 2>&1; then
         die "Firefox desktop launcher is present."
@@ -938,6 +1107,41 @@ cmd_verify() {
             die "VLC is not the default Matroska video handler."
         grep -qx 'x-content/video-dvd=vlc.desktop' <<<"$application_defaults" ||
             die "VLC is not the default video DVD handler."
+        for office_mime in \
+            application/msword \
+            application/msword-template \
+            application/vnd.ms-word.document.macroEnabled.12 \
+            application/vnd.ms-word.template.macroEnabled.12 \
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document \
+            application/vnd.openxmlformats-officedocument.wordprocessingml.template \
+            application/vnd.ms-excel \
+            application/vnd.ms-excel.sheet.macroEnabled.12 \
+            application/vnd.ms-excel.sheet.binary.macroEnabled.12 \
+            application/vnd.ms-excel.template.macroEnabled.12 \
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet \
+            application/vnd.openxmlformats-officedocument.spreadsheetml.template \
+            application/vnd.ms-powerpoint \
+            application/vnd.ms-powerpoint.presentation.macroEnabled.12 \
+            application/vnd.ms-powerpoint.slideshow.macroEnabled.12 \
+            application/vnd.ms-powerpoint.template.macroEnabled.12 \
+            application/vnd.openxmlformats-officedocument.presentationml.presentation \
+            application/vnd.openxmlformats-officedocument.presentationml.slideshow \
+            application/vnd.openxmlformats-officedocument.presentationml.template \
+            application/rtf text/rtf application/csv text/csv \
+            text/comma-separated-values text/x-comma-separated-values; do
+            grep -Fqx "$office_mime=onlyoffice-desktopeditors.desktop" <<<"$application_defaults" ||
+                die "ONLYOFFICE is not the default handler for $office_mime."
+            [[ ";${onlyoffice_launcher#*MimeType=}" == *";$office_mime;"* ]] ||
+                die "ONLYOFFICE launcher does not advertise $office_mime."
+        done
+        grep -qx 'application/pdf=xreader.desktop' <<<"$application_defaults" ||
+            die "The existing PDF default was not preserved."
+        grep -qx 'application/vnd.oasis.opendocument.text=libreoffice-writer.desktop' \
+            <<<"$application_defaults" || die "The existing ODT default was not preserved."
+        grep -qx 'application/vnd.oasis.opendocument.spreadsheet=libreoffice-calc.desktop' \
+            <<<"$application_defaults" || die "The existing ODS default was not preserved."
+        grep -qx 'application/vnd.oasis.opendocument.presentation=libreoffice-impress.desktop' \
+            <<<"$application_defaults" || die "The existing ODP default was not preserved."
         if grep -q '=firefox.desktop$' <<<"$application_defaults"; then
             die "Firefox remains assigned as a MIME handler."
         fi
@@ -969,7 +1173,7 @@ cmd_verify() {
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/backgrounds/napos/napos-wallpaper.svg >/dev/null 2>&1 || die "NapOS wallpaper is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/icons/hicolor/scalable/apps/napos-logo.svg >/dev/null 2>&1 || die "NapOS logo is missing."
 
-    for package in vlc flameshot git curl htop vim "$GOOGLE_CHROME_PACKAGE"; do
+    for package in vlc flameshot git curl htop vim "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE"; do
         grep -Eq "^${package} " "$temp/filesystem.manifest" || die "Package is absent from filesystem.manifest: $package"
     done
     while IFS= read -r package; do
@@ -982,6 +1186,12 @@ cmd_verify() {
     [[ -n "$chrome_version" ]] || die "Google Chrome version is absent from filesystem.manifest."
     if grep -Eq "^${GOOGLE_CHROME_PACKAGE}([[:space:]]|$)" "$temp/filesystem.manifest-remove"; then
         die "Google Chrome is listed for removal by the live installer."
+    fi
+    onlyoffice_version=$(awk -v wanted="$ONLYOFFICE_PACKAGE" '$1 == wanted { print $2; exit }' \
+        "$temp/filesystem.manifest")
+    [[ -n "$onlyoffice_version" ]] || die "ONLYOFFICE version is absent from filesystem.manifest."
+    if grep -Eq "^${ONLYOFFICE_PACKAGE}([[:space:]]|$)" "$temp/filesystem.manifest-remove"; then
+        die "ONLYOFFICE is listed for removal by the live installer."
     fi
     if grep -q 'Napos' <<<"$napos_release$os_release$installer"; then
         die 'Incorrect product capitalization "Napos" found in the ISO.'
@@ -1013,6 +1223,26 @@ cmd_verify() {
             die "Adjacent provenance has an unexpected Google Chrome signing fingerprint."
         [[ "$(jq -r .source.google_chrome.sha256 "$build_info")" =~ ^[a-f0-9]{64}$ ]] ||
             die "Adjacent provenance has an invalid Google Chrome SHA-256."
+        [[ "$(jq -r .source.onlyoffice.package "$build_info")" == "$ONLYOFFICE_PACKAGE" ]] ||
+            die "Adjacent provenance has an unexpected ONLYOFFICE package name."
+        [[ "$(jq -r .source.onlyoffice.version "$build_info")" == "$onlyoffice_version" ]] ||
+            die "Adjacent provenance and ONLYOFFICE manifest versions differ."
+        [[ "$(jq -r .source.onlyoffice.architecture "$build_info")" == "$ONLYOFFICE_ARCH" ]] ||
+            die "Adjacent provenance has an unexpected ONLYOFFICE architecture."
+        [[ "$(jq -r .source.onlyoffice.url "$build_info")" == "$ONLYOFFICE_DEB_URL" ]] ||
+            die "Adjacent provenance has an unexpected ONLYOFFICE download URL."
+        [[ "$(jq -r .source.onlyoffice.repository "$build_info")" == "$ONLYOFFICE_APT_URL" ]] ||
+            die "Adjacent provenance has an unexpected ONLYOFFICE repository."
+        [[ "$(jq -r .source.onlyoffice.repository_suite "$build_info")" == "$ONLYOFFICE_APT_SUITE" ]] ||
+            die "Adjacent provenance has an unexpected ONLYOFFICE repository suite."
+        [[ "$(jq -r .source.onlyoffice.repository_package_path "$build_info")" == \
+            pool/main/o/onlyoffice-desktopeditors/*.deb ]] ||
+            die "Adjacent provenance has an unexpected ONLYOFFICE repository package path."
+        [[ "$(jq -r .source.onlyoffice.signing_fingerprint "$build_info")" == \
+            "$ONLYOFFICE_SIGNING_FINGERPRINT" ]] ||
+            die "Adjacent provenance has an unexpected ONLYOFFICE signing fingerprint."
+        [[ "$(jq -r .source.onlyoffice.sha256 "$build_info")" =~ ^[a-f0-9]{64}$ ]] ||
+            die "Adjacent provenance has an invalid ONLYOFFICE SHA-256."
     fi
     ok "NapOS identity, packages, locale, timezone, artwork, and installer metadata are valid."
     ok "Verified ISO: $iso"
@@ -1033,7 +1263,7 @@ cmd_inspect() {
     printf '\nNapOS release:\n'
     unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
     printf '\nSelected packages:\n'
-    for package in vlc flameshot git curl htop vim "$GOOGLE_CHROME_PACKAGE"; do
+    for package in vlc flameshot git curl htop vim "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE"; do
         awk -v wanted="$package" '$1 == wanted {print; found=1} END {if (!found) print wanted " (missing)"}' \
             "$temp/filesystem.manifest"
     done

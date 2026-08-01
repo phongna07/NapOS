@@ -8,7 +8,7 @@
 - [x] Chrome
 - [ ] fcitx5-lotus
 - [ ] OBS Studio
-- [ ] OnlyOffice
+- [x] OnlyOffice
 - [ ] Zalo appimage
 - [ ] zsh shell
 - [x] config vlc media player as the default

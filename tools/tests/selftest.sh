@@ -83,6 +83,13 @@ invalid_google_fingerprint_config() (
 )
 expect_failure "Invalid Google signing fingerprint is rejected" invalid_google_fingerprint_config
 
+invalid_onlyoffice_fingerprint_config() (
+    # shellcheck disable=SC2030
+    local ONLYOFFICE_SIGNING_FINGERPRINT=0000
+    validate_config 2>/dev/null
+)
+expect_failure "Invalid ONLYOFFICE signing fingerprint is rejected" invalid_onlyoffice_fingerprint_config
+
 # shellcheck disable=SC2031
 if [[ "$MINT_SIGNING_FINGERPRINT" == "27DEB15644C6B3CF3BD7D291300F846BA25BAE09" ]]; then
     pass "Mint signing fingerprint equals the committed pin"
@@ -95,6 +102,13 @@ if [[ "$GOOGLE_CHROME_SIGNING_FINGERPRINT" == "EB4C1BFD4F042F6DDDCCEC917721F63BD
     pass "Google signing fingerprint equals the committed pin"
 else
     fail "Google signing fingerprint equals the committed pin"
+fi
+
+# shellcheck disable=SC2031
+if [[ "$ONLYOFFICE_SIGNING_FINGERPRINT" == "E09CA29F6E178040EF22B4098320CA65CB2DE8E5" ]]; then
+    pass "ONLYOFFICE signing fingerprint equals the committed pin"
+else
+    fail "ONLYOFFICE signing fingerprint equals the committed pin"
 fi
 
 printf 'NapOS checksum fixture\n' >"$safe_root/payload"
@@ -174,6 +188,70 @@ sed 's/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/not-a-sh
     "$safe_root/Packages" >"$safe_root/Packages-bad-sha"
 expect_failure "Chrome package metadata rejects an invalid package SHA-256" \
     chrome_package_metadata "$safe_root/Packages-bad-sha"
+
+cat >"$safe_root/OnlyOffice-Packages" <<'EOF'
+Package: onlyoffice-desktopeditors
+Version: 9.3.2-1
+Architecture: amd64
+Filename: pool/main/o/onlyoffice-desktopeditors/onlyoffice-desktopeditors_9.3.2_amd64.deb
+Size: 330000000
+SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+Package: unrelated-package
+Version: 99.0
+Architecture: amd64
+Filename: pool/main/u/unrelated-package.deb
+Size: 10
+SHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+Package: onlyoffice-desktopeditors
+Version: 9.4.0-129
+Architecture: amd64
+Filename: pool/main/o/onlyoffice-desktopeditors/onlyoffice-desktopeditors_9.4.0_amd64.deb
+Size: 364644136
+SHA256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+EOF
+onlyoffice_metadata=$(onlyoffice_package_metadata "$safe_root/OnlyOffice-Packages")
+expected_onlyoffice_metadata=$'9.4.0-129\tpool/main/o/onlyoffice-desktopeditors/onlyoffice-desktopeditors_9.4.0_amd64.deb\tcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\t364644136'
+if [[ "$onlyoffice_metadata" == "$expected_onlyoffice_metadata" ]]; then
+    pass "ONLYOFFICE metadata selects the highest stable amd64 version"
+else
+    fail "ONLYOFFICE metadata selects the highest stable amd64 version"
+fi
+sed 's/Architecture: amd64/Architecture: arm64/g' "$safe_root/OnlyOffice-Packages" \
+    >"$safe_root/OnlyOffice-Packages-wrong-arch"
+expect_failure "ONLYOFFICE metadata rejects the wrong architecture" \
+    onlyoffice_package_metadata "$safe_root/OnlyOffice-Packages-wrong-arch"
+sed 's/Package: onlyoffice-desktopeditors/Package: onlyoffice-desktopeditors-enterprise/g' \
+    "$safe_root/OnlyOffice-Packages" >"$safe_root/OnlyOffice-Packages-wrong-name"
+expect_failure "ONLYOFFICE metadata rejects the wrong package name" \
+    onlyoffice_package_metadata "$safe_root/OnlyOffice-Packages-wrong-name"
+sed 's/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/not-a-sha256/' \
+    "$safe_root/OnlyOffice-Packages" >"$safe_root/OnlyOffice-Packages-bad-sha"
+expect_failure "ONLYOFFICE metadata rejects an invalid package SHA-256" \
+    onlyoffice_package_metadata "$safe_root/OnlyOffice-Packages-bad-sha"
+
+mkdir -p "$safe_root/onlyoffice-package/DEBIAN" "$safe_root/onlyoffice-package/usr/share/napos-test"
+cat >"$safe_root/onlyoffice-package/DEBIAN/control" <<'EOF'
+Package: onlyoffice-desktopeditors
+Version: 9.4.0-129
+Architecture: amd64
+Maintainer: NapOS tests <noreply@example.invalid>
+Description: ONLYOFFICE validation fixture
+EOF
+printf 'fixture\n' >"$safe_root/onlyoffice-package/usr/share/napos-test/payload"
+dpkg-deb --build "$safe_root/onlyoffice-package" "$safe_root/onlyoffice.deb" >/dev/null
+onlyoffice_fixture_sha=$(sha256_of "$safe_root/onlyoffice.deb")
+onlyoffice_fixture_size=$(stat -c '%s' "$safe_root/onlyoffice.deb")
+expect_success "ONLYOFFICE package validator accepts authenticated metadata" \
+    validate_onlyoffice_deb "$safe_root/onlyoffice.deb" 9.4.0-129 \
+    "$onlyoffice_fixture_sha" "$onlyoffice_fixture_size"
+expect_failure "ONLYOFFICE package validator rejects the wrong version" \
+    validate_onlyoffice_deb "$safe_root/onlyoffice.deb" 9.3.2-1 \
+    "$onlyoffice_fixture_sha" "$onlyoffice_fixture_size"
+expect_failure "ONLYOFFICE package validator rejects the wrong size" \
+    validate_onlyoffice_deb "$safe_root/onlyoffice.deb" 9.4.0-129 \
+    "$onlyoffice_fixture_sha" "$((onlyoffice_fixture_size + 1))"
 
 cat >"$safe_root/google-chrome.sources" <<EOF
 Types: deb
@@ -315,6 +393,51 @@ if grep -Fq 's/io\.github\.celluloid_player\.Celluloid\.desktop/vlc.desktop/g' \
     pass "Desktop customization replaces Celluloid defaults with VLC"
 else
     fail "Desktop customization replaces Celluloid defaults with VLC"
+fi
+
+eval "$(sed -n '/^set_mime_default()/,/^}/p' \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+office_mimeapps_fixture="$safe_root/office-mimeapps.list"
+cat >"$office_mimeapps_fixture" <<'EOF'
+[Default Applications]
+application/pdf=xreader.desktop
+application/vnd.oasis.opendocument.text=libreoffice-writer.desktop
+application/msword=libreoffice-writer.desktop
+application/msword=duplicate.desktop
+
+[Added Associations]
+application/msword=libreoffice-writer.desktop;
+EOF
+set_mime_default "$office_mimeapps_fixture" application/msword onlyoffice-desktopeditors.desktop
+set_mime_default "$office_mimeapps_fixture" application/msword onlyoffice-desktopeditors.desktop
+set_mime_default "$office_mimeapps_fixture" \
+    application/vnd.ms-excel.sheet.macroEnabled.12 onlyoffice-desktopeditors.desktop
+default_section=$(awk '
+    /^\[Default Applications\]$/ { active=1; next }
+    /^\[/ { active=0 }
+    active { print }
+' "$office_mimeapps_fixture")
+if [[ "$(grep -Fc 'application/msword=onlyoffice-desktopeditors.desktop' <<<"$default_section")" == 1 ]] &&
+    grep -Fqx 'application/vnd.ms-excel.sheet.macroEnabled.12=onlyoffice-desktopeditors.desktop' \
+        <<<"$default_section" &&
+    grep -Fqx 'application/pdf=xreader.desktop' <<<"$default_section" &&
+    grep -Fqx 'application/vnd.oasis.opendocument.text=libreoffice-writer.desktop' \
+        <<<"$default_section" &&
+    grep -Fqx 'application/msword=libreoffice-writer.desktop;' "$office_mimeapps_fixture"; then
+    pass "ONLYOFFICE MIME defaults replace, insert, deduplicate, and preserve unrelated policy"
+else
+    fail "ONLYOFFICE MIME defaults replace, insert, deduplicate, and preserve unrelated policy"
+fi
+
+if grep -Fq 'application/vnd.ms-excel.sheet.binary.macroEnabled.12' \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+    grep -Fq 'application/vnd.ms-powerpoint.slideshow.macroEnabled.12' \
+        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+    grep -Fq 'text/x-comma-separated-values' \
+        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+    pass "ONLYOFFICE policy includes Microsoft templates, macros, slideshows, RTF, and CSV"
+else
+    fail "ONLYOFFICE policy includes Microsoft templates, macros, slideshows, RTF, and CSV"
 fi
 
 if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then

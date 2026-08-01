@@ -25,12 +25,16 @@ Confirm the output shows:
   `EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796`.
 - A Google Chrome stable version whose `.deb` matches Google's signed repository
   metadata.
+- ONLYOFFICE signing fingerprint
+  `E09CA29F6E178040EF22B4098320CA65CB2DE8E5`.
+- An ONLYOFFICE Desktop Editors amd64 version whose official website `.deb`
+  matches ONLYOFFICE's signed repository metadata.
 - An authenticated ISO below `cache/downloads/`.
 
-A second invocation should reuse the ISO and a still-current authenticated
-Chrome package. Google metadata is refreshed on every fetch so a newly released
-stable package is selected automatically. If either cached input changes, the
-workflow quarantines it and downloads a new copy.
+A second invocation should reuse the ISO and still-current authenticated Chrome
+and ONLYOFFICE packages. Vendor metadata is refreshed on every fetch so newly
+released stable packages are selected automatically. If a cached package no
+longer matches, the workflow quarantines it and downloads a new copy.
 
 ## 3. Development build
 
@@ -69,17 +73,25 @@ Verification requires:
   `filesystem.manifest`.
 - The resolved `google-chrome-stable` version, executable, desktop launcher,
   official APT source, and signing key inside the live SquashFS.
+- The resolved `onlyoffice-desktopeditors` version, executable, desktop
+  launcher, and Microsoft Office MIME declarations inside the live SquashFS.
+- ONLYOFFICE assigned to Word, Excel, PowerPoint, RTF, and CSV formats in both
+  system MIME policies while existing PDF and OpenDocument defaults remain
+  unchanged.
 - Google Chrome assigned as the HTTP/HTML handler and present in Cinnamon's
   default panel launchers, with no remaining Firefox launcher.
 - No `google-chrome-stable` entry in `filesystem.manifest-remove`, so the
   installed system retains Chrome.
+- No `onlyoffice-desktopeditors` entry in `filesystem.manifest-remove`, so the
+  installed system retains ONLYOFFICE.
 - An unchanged `filesystem.manifest-remove` from the authenticated Mint ISO.
   Its Firefox locale entries are preserved upstream installer metadata and do
   not indicate that those packages remain in the customized SquashFS.
 
 Inspection prints the SquashFS compression and the adjacent provenance JSON.
-The JSON records the exact Chrome version, SHA-256, repository package path,
-Google signing fingerprint, and package-removal policy hash used by the build.
+The JSON records the exact Chrome and ONLYOFFICE versions, SHA-256 values,
+repository package paths, signing fingerprints, and package-removal policy hash
+used by the build.
 
 ## 5. Release build
 
