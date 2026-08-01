@@ -179,11 +179,15 @@ validate_cinnamon_copyq_defaults() {
     ' <<<"$dconf_data"
 }
 
-validate_cinnamon_application_theme_defaults() {
+validate_cinnamon_theme_defaults() {
     local dconf_data=$1
     awk '
         $0 == "[org/cinnamon/desktop/interface]" {
             section="interface"
+            next
+        }
+        $0 == "[org/x/apps/portal]" {
+            section="portal"
             next
         }
         $0 == "[org/cinnamon/theme]" {
@@ -199,10 +203,21 @@ validate_cinnamon_application_theme_defaults() {
             application_theme++
             next
         }
+        section == "interface" && $0 == "cursor-theme=\x27Yaru\x27" {
+            cursor_theme++
+            next
+        }
+        section == "portal" && $0 == "color-scheme=\x27prefer-dark\x27" {
+            dark_mode++
+            next
+        }
         section == "interface" && /^(gtk-theme|icon-theme|cursor-theme)=/ { forbidden=1 }
+        section == "portal" && /^color-scheme=/ { forbidden=1 }
         section == "desktop-theme" && /^name=/ { forbidden=1 }
         section == "window-manager" && /^theme=/ { forbidden=1 }
-        END { exit !(application_theme == 1 && !forbidden) }
+        END {
+            exit !(application_theme == 1 && cursor_theme == 1 && dark_mode == 1 && !forbidden)
+        }
     ' <<<"$dconf_data"
 }
 
@@ -1053,7 +1068,7 @@ validate_customized_rootfs() {
         ubuntu-pro-client:/etc/apt/preferences.d/ubuntu-pro-esm-infra
     )
     local packages=(
-        vlc flameshot git copyq curl htop vim ttf-mscorefonts-installer
+        vlc flameshot copyq ttf-mscorefonts-installer
         gtk2-engines-murrine gtk2-engines-pixbuf
         fcitx5 fcitx5-config-qt fcitx5-frontend-all
     )
@@ -1088,7 +1103,10 @@ validate_customized_rootfs() {
         [[ -f /usr/share/themes/Windows-10-Dark/LICENSE.md ]]
         grep -qx "Name=Windows-10-Dark" /usr/share/themes/Windows-10-Dark/index.theme
         grep -qx "GtkTheme=Windows-10-Dark" /usr/share/themes/Windows-10-Dark/index.theme
-        ! grep -Rqs "/org/cinnamon/desktop/interface/gtk-theme" /etc/dconf/db/local.d/locks
+        [[ -f /usr/share/icons/Yaru/index.theme ]]
+        [[ -f /usr/share/icons/Yaru/cursors/left_ptr ]]
+        ! grep -RqsE "/org/cinnamon/desktop/interface/(gtk|cursor)-theme|/org/x/apps/portal/color-scheme" \
+            /etc/dconf/db/local.d/locks
         [[ -x /usr/bin/google-chrome-stable ]]
         [[ -f /usr/share/applications/google-chrome.desktop ]]
         [[ -f /usr/share/applications/vlc.desktop ]]
@@ -1213,8 +1231,8 @@ validate_customized_rootfs() {
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     validate_cinnamon_copyq_defaults "$dconf_data" ||
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
-    validate_cinnamon_application_theme_defaults "$dconf_data" ||
-        die "Cinnamon application theme default is missing or changes another theme category."
+    validate_cinnamon_theme_defaults "$dconf_data" ||
+        die "Cinnamon theme, pointer, or dark-mode defaults are missing or invalid."
     base_reference=$(base_reference_root)
     sudo cmp -s "$ROOTFS/etc/lsb-release" "$base_reference/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
@@ -1774,8 +1792,8 @@ cmd_verify() {
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     validate_cinnamon_copyq_defaults "$dconf_data" ||
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
-    validate_cinnamon_application_theme_defaults "$dconf_data" ||
-        die "Cinnamon application theme default is missing or changes another theme category."
+    validate_cinnamon_theme_defaults "$dconf_data" ||
+        die "Cinnamon theme, pointer, or dark-mode defaults are missing or invalid."
     grep -q '^Name=Install NapOS$' <<<"$installer" || die "Installer launcher is not branded Install NapOS."
     grep -q '^Name\[vi\]=Cài đặt NapOS$' <<<"$installer" || die "Vietnamese installer label is not branded Cài đặt NapOS."
     grep -q '^Icon=napos-logo$' <<<"$installer" || die "Installer launcher icon is not NapOS."
@@ -1799,8 +1817,11 @@ cmd_verify() {
             "usr/share/themes/Windows-10-Dark/$theme_file" >/dev/null 2>&1 ||
             die "Windows 10 Dark theme payload is missing: $theme_file"
     done
+    unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/icons/Yaru/cursors/left_ptr >/dev/null 2>&1 ||
+        die "Yaru mouse-pointer payload is missing."
 
-    for package in vlc flameshot git copyq curl htop vim ibus ttf-mscorefonts-installer \
+    for package in vlc flameshot copyq ibus ttf-mscorefonts-installer \
         gtk2-engines-murrine gtk2-engines-pixbuf \
         fcitx5 fcitx5-config-qt fcitx5-frontend-all \
         "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
@@ -1940,7 +1961,7 @@ cmd_inspect() {
     printf '\nNapOS release:\n'
     unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
     printf '\nSelected packages:\n'
-    for package in vlc flameshot git copyq curl htop vim ttf-mscorefonts-installer \
+    for package in vlc flameshot copyq ttf-mscorefonts-installer \
         gtk2-engines-murrine gtk2-engines-pixbuf \
         fcitx5 fcitx5-config-qt fcitx5-frontend-all \
         "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do

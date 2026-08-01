@@ -15,9 +15,9 @@
 - [x] clipboard history
 - [ ] add desktop icons and taskbar icons
 - [x] center the taskbar
-- [ ] edit the minimize, maximize, close buttons for each windows (Windows-10-Dark set the Applications option in Themes)
-- [ ] mouse pointer "Yaru"
-- [ ] dark theme
+- [x] edit the minimize, maximize, close buttons for each windows (Windows-10-Dark set the Applications option in Themes)
+- [x] mouse pointer "Yaru"
+- [x] dark theme
 - [ ] fastfetch
 - [ ] set "Intall multimedia codecs" as the default
 - [ ] Change GRUB boot name (currently Linux Mint)

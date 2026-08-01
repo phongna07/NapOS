@@ -71,6 +71,10 @@ enabled-applets=['panel1:center:0:menu@cinnamon.org', 'panel1:left:1:separator@c
 
 [org/cinnamon/desktop/interface]
 gtk-theme='Windows-10-Dark'
+cursor-theme='Yaru'
+
+[org/x/apps/portal]
+color-scheme='prefer-dark'
 
 [org/cinnamon/desktop/keybindings]
 custom-list=['custom0']

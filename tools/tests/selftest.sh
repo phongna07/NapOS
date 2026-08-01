@@ -528,7 +528,7 @@ expect_failure "Installed package conffile rejects modified content" \
 expect_failure "Installed package conffile rejects the wrong owning package" \
     verify_installed_conffile "$conffile_root" unexpected-package "$conffile_path"
 
-expected_packages=$'copyq\ncurl\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngit\ngtk2-engines-murrine\ngtk2-engines-pixbuf\nhtop\nttf-mscorefonts-installer\nvim\nvlc'
+expected_packages=$'copyq\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngtk2-engines-murrine\ngtk2-engines-pixbuf\nttf-mscorefonts-installer\nvlc'
 actual_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$PROJECT_ROOT/config/packages.txt" | sort)
 if [[ "$actual_packages" == "$expected_packages" ]]; then
     pass "Desktop-essential package profile is exact"
@@ -839,7 +839,7 @@ eval "$(sed -n '/^validate_cinnamon_panel_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_copyq_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
-eval "$(sed -n '/^validate_cinnamon_application_theme_defaults()/,/^}/p' \
+eval "$(sed -n '/^validate_cinnamon_theme_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 dconf_defaults=$(awk '
     index($0, "cat >/etc/dconf/db/local.d/00-napos") { active=1; next }
@@ -862,28 +862,32 @@ expect_success "Cinnamon defaults bind Super+V to the CopyQ history toggle" \
 invalid_copyq_defaults=${dconf_defaults//<Super>v/<Super>x}
 expect_failure "Cinnamon CopyQ defaults reject an incorrect shortcut" \
     validate_cinnamon_copyq_defaults "$invalid_copyq_defaults"
-expect_success "Cinnamon defaults select Windows-10-Dark for Applications only" \
-    validate_cinnamon_application_theme_defaults "$dconf_defaults"
+expect_success "Cinnamon defaults select Windows-10-Dark, the Yaru pointer, and dark mode" \
+    validate_cinnamon_theme_defaults "$dconf_defaults"
 wrong_application_theme=${dconf_defaults/gtk-theme=\'Windows-10-Dark\'/gtk-theme=\'Mint-Y-Aqua\'}
 expect_failure "Cinnamon defaults reject the wrong Applications theme" \
-    validate_cinnamon_application_theme_defaults "$wrong_application_theme"
+    validate_cinnamon_theme_defaults "$wrong_application_theme"
 icon_theme_defaults=${dconf_defaults/gtk-theme=\'Windows-10-Dark\'/$'gtk-theme=\'Windows-10-Dark\'\nicon-theme=\'Windows-10-Icons\''}
-expect_failure "Cinnamon Applications default rejects an accompanying icon change" \
-    validate_cinnamon_application_theme_defaults "$icon_theme_defaults"
-cursor_theme_defaults=${dconf_defaults/gtk-theme=\'Windows-10-Dark\'/$'gtk-theme=\'Windows-10-Dark\'\ncursor-theme=\'DMZ-White\''}
-expect_failure "Cinnamon Applications default rejects an accompanying pointer change" \
-    validate_cinnamon_application_theme_defaults "$cursor_theme_defaults"
+expect_failure "Cinnamon theme defaults reject an accompanying icon change" \
+    validate_cinnamon_theme_defaults "$icon_theme_defaults"
+wrong_cursor_theme=${dconf_defaults/cursor-theme=\'Yaru\'/cursor-theme=\'DMZ-White\'}
+expect_failure "Cinnamon theme defaults reject the wrong mouse pointer" \
+    validate_cinnamon_theme_defaults "$wrong_cursor_theme"
+wrong_color_scheme=${dconf_defaults/color-scheme=\'prefer-dark\'/color-scheme=\'prefer-light\'}
+expect_failure "Cinnamon theme defaults reject a non-dark color scheme" \
+    validate_cinnamon_theme_defaults "$wrong_color_scheme"
 desktop_theme_defaults=$dconf_defaults$'\n[org/cinnamon/theme]\nname=\'Windows-10-Dark\''
-expect_failure "Cinnamon Applications default rejects an accompanying desktop-theme change" \
-    validate_cinnamon_application_theme_defaults "$desktop_theme_defaults"
+expect_failure "Cinnamon theme defaults reject an accompanying desktop-theme change" \
+    validate_cinnamon_theme_defaults "$desktop_theme_defaults"
 window_theme_defaults=$dconf_defaults$'\n[org/cinnamon/desktop/wm/preferences]\ntheme=\'Windows-10-Dark\''
-expect_failure "Cinnamon Applications default rejects an accompanying window-border change" \
-    validate_cinnamon_application_theme_defaults "$window_theme_defaults"
+expect_failure "Cinnamon theme defaults reject an accompanying window-border change" \
+    validate_cinnamon_theme_defaults "$window_theme_defaults"
 
-if ! rg -n '/org/cinnamon/desktop/interface/gtk-theme' "$PROJECT_ROOT/config" >/dev/null; then
-    pass "Windows 10 Dark Applications default is not locked"
+if ! rg -n '/org/cinnamon/desktop/interface/(gtk|cursor)-theme|/org/x/apps/portal/color-scheme' \
+    "$PROJECT_ROOT/config" >/dev/null; then
+    pass "Cinnamon theme defaults are not locked"
 else
-    fail "Windows 10 Dark Applications default is not locked"
+    fail "Cinnamon theme defaults are not locked"
 fi
 
 if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then

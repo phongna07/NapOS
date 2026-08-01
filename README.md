@@ -101,8 +101,8 @@ under `dist/`.
    into a cache keyed by the authenticated ISO hash.
 4. **Fresh work tree:** copies the immutable cache for every build so package
    changes never accumulate across builds.
-5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, Vim, Fcitx5 with
-   its GTK/Qt frontends, the Microsoft TrueType core fonts, and the authenticated
+5. **Customize:** installs VLC, Flameshot, CopyQ, Fcitx5 with its GTK/Qt
+   frontends, the Microsoft TrueType core fonts, and the authenticated
    Google Chrome, ONLYOFFICE, and Fcitx5 Lotus `.deb` files; pre-accepts the
    Microsoft font EULA for the noninteractive build, downloads the checksummed
    font payload through Ubuntu's installer package, configures Lotus for every

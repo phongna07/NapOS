@@ -76,10 +76,11 @@ Verification requires:
 - CopyQ installed with a system-wide hidden autostart entry and a user-overridable
   Cinnamon `Super+V` shortcut that runs `copyq toggle`.
 - The authenticated `Windows-10-Dark` theme payload installed system-wide and
-  selected only for Cinnamon's Applications theme, without a dconf lock or
-  pointer, icon, desktop-shell, or window-border override.
+  selected for Cinnamon's Applications theme, with the Yaru mouse pointer and
+  dark mode selected by default. These defaults remain user-overridable, and
+  no icon, desktop-shell, or window-border theme is overridden.
 - Installer label `Install NapOS`.
-- All selected desktop packages in `filesystem.manifest`.
+- All packages selected in `config/packages.txt` in `filesystem.manifest`.
 - The `ttf-mscorefonts-installer` package plus its Arial and Times New Roman
   payload files inside the live SquashFS.
 - No Firefox, Firefox locale, Mint Chat, Celluloid, or LibreOffice package in

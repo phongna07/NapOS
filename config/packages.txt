@@ -1,14 +1,10 @@
 # Packages from the Linux Mint / Ubuntu repositories.
 copyq
-curl
 fcitx5
 fcitx5-config-qt
 fcitx5-frontend-all
 flameshot
-git
 gtk2-engines-murrine
 gtk2-engines-pixbuf
-htop
 ttf-mscorefonts-installer
-vim
 vlc
