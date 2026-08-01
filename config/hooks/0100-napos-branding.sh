@@ -79,6 +79,44 @@ picture-options='zoom'
 EOF
 dconf update
 
+printf '[NapOS] Configuring Fcitx5 Lotus defaults...\n'
+chmod 0755 /usr/libexec/napos-fcitx5-lotus-user
+for variable in XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE; do
+    sed -i "/^${variable}=/d" /etc/environment
+done
+cat >>/etc/environment <<'EOF'
+XMODIFIERS=@im=fcitx
+GTK_IM_MODULE=fcitx
+QT_IM_MODULE=fcitx
+SDL_IM_MODULE=fcitx
+GLFW_IM_MODULE=ibus
+EOF
+
+fcitx_desktop=/usr/share/applications/org.fcitx.Fcitx5.desktop
+[[ -f "$fcitx_desktop" ]] || {
+    printf 'Required Fcitx5 desktop launcher is missing: %s\n' "$fcitx_desktop" >&2
+    exit 1
+}
+mkdir -p /etc/xdg/autostart /etc/apt/sources.list.d /usr/share/keyrings
+cp "$fcitx_desktop" /etc/xdg/autostart/org.fcitx.Fcitx5.desktop
+chmod 0644 /etc/xdg/autostart/org.fcitx.Fcitx5.desktop
+
+[[ -s /usr/share/keyrings/fcitx5-lotus.gpg ]] || {
+    printf 'Authenticated Fcitx5 Lotus keyring is missing.\n' >&2
+    exit 1
+}
+cat >/etc/apt/sources.list.d/fcitx5-lotus.sources <<EOF
+Types: deb
+URIs: https://fcitx5-lotus.pages.dev/apt/$UBUNTU_CODENAME
+Suites: $UBUNTU_CODENAME
+Components: main
+Architectures: amd64
+Signed-By: /usr/share/keyrings/fcitx5-lotus.gpg
+EOF
+
+rm -f /etc/systemd/system/multi-user.target.wants/fcitx5-lotus-server@root.service
+systemd-sysusers
+
 printf '[NapOS] Configuring default applications...\n'
 celluloid_desktop=io.github.celluloid_player.Celluloid.desktop
 vlc_desktop=vlc.desktop

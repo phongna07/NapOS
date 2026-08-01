@@ -15,6 +15,7 @@ CACHE_DIR="$PROJECT_ROOT/cache"
 DOWNLOAD_DIR="$CACHE_DIR/downloads/$BASE_ISO_SHA256"
 CHROME_DOWNLOAD_DIR="$CACHE_DIR/downloads/google-chrome"
 ONLYOFFICE_DOWNLOAD_DIR="$CACHE_DIR/downloads/onlyoffice"
+FCITX5_LOTUS_DOWNLOAD_DIR="$CACHE_DIR/downloads/fcitx5-lotus"
 BASE_CACHE_DIR="$CACHE_DIR/base/$BASE_ISO_SHA256"
 WORK_DIR="$PROJECT_ROOT/work"
 ISO_TREE="$WORK_DIR/iso-tree"
@@ -26,7 +27,7 @@ CONFIG_DIR="$PROJECT_ROOT/config"
 
 # These shared readonly values are consumed by scripts that source this library.
 # shellcheck disable=SC2034
-readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR CHROME_DOWNLOAD_DIR ONLYOFFICE_DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
+readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR CHROME_DOWNLOAD_DIR ONLYOFFICE_DOWNLOAD_DIR FCITX5_LOTUS_DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
 # shellcheck disable=SC2034
 readonly ISO_TREE ROOTFS META_DIR BASE_REFERENCE_DIR DIST_DIR CONFIG_DIR
 
@@ -92,6 +93,14 @@ validate_config() {
         die "Unexpected ONLYOFFICE signing-key URL."
     [[ "$(trim_fingerprint "$ONLYOFFICE_SIGNING_FINGERPRINT")" =~ ^[A-F0-9]{40}$ ]] ||
         die "Invalid ONLYOFFICE signing fingerprint."
+    [[ "$FCITX5_LOTUS_PACKAGE" == "fcitx5-lotus" ]] || die "Unexpected Fcitx5 Lotus package name."
+    [[ "$FCITX5_LOTUS_ARCH" == "amd64" ]] || die "Fcitx5 Lotus input must target amd64."
+    [[ "$FCITX5_LOTUS_APT_ROOT" == "https://fcitx5-lotus.pages.dev/apt" ]] ||
+        die "Unexpected Fcitx5 Lotus APT root."
+    [[ "$FCITX5_LOTUS_SIGNING_KEY_URL" == "https://fcitx5-lotus.pages.dev/pubkey.gpg" ]] ||
+        die "Unexpected Fcitx5 Lotus signing-key URL."
+    [[ "$(trim_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT")" =~ ^[A-F0-9]{40}$ ]] ||
+        die "Invalid Fcitx5 Lotus signing fingerprint."
     [[ -f "$CONFIG_DIR/packages.txt" ]] || die "Missing package list: $CONFIG_DIR/packages.txt"
     [[ -f "$CONFIG_DIR/packages-remove.txt" ]] ||
         die "Missing package removal list: $CONFIG_DIR/packages-remove.txt"
@@ -235,6 +244,33 @@ onlyoffice_package_metadata() {
         "$selected_version" "$selected_filename" "$selected_sha256" "$selected_size"
 }
 
+fcitx5_lotus_package_metadata() {
+    local packages_file=$1
+    awk -v wanted_package="$FCITX5_LOTUS_PACKAGE" -v wanted_arch="$FCITX5_LOTUS_ARCH" '
+        BEGIN { RS=""; FS="\n" }
+        {
+            delete value
+            for (i=1; i<=NF; i++) {
+                separator=index($i, ": ")
+                if (separator > 0) {
+                    key=substr($i, 1, separator-1)
+                    value[key]=substr($i, separator+2)
+                }
+            }
+            if (value["Package"] == wanted_package && value["Architecture"] == wanted_arch) {
+                if (value["Version"] == "" || value["Filename"] == "" ||
+                    value["SHA256"] !~ /^[a-f0-9]{64}$/ || value["Size"] !~ /^[0-9]+$/) {
+                    exit 2
+                }
+                print value["Version"] "\t" value["Filename"] "\t" value["SHA256"] "\t" value["Size"]
+                found=1
+                exit
+            }
+        }
+        END { if (!found) exit 1 }
+    ' "$packages_file"
+}
+
 validate_onlyoffice_deb() {
     local path=$1
     local expected_version=$2
@@ -250,6 +286,21 @@ validate_onlyoffice_deb() {
     [[ "$architecture" == "$ONLYOFFICE_ARCH" ]]
 }
 
+validate_fcitx5_lotus_deb() {
+    local path=$1
+    local expected_version=$2
+    local expected_sha256=$3
+    local expected_size=$4
+    local package version architecture
+    verify_file_sha256_and_size "$path" "$expected_sha256" "$expected_size" || return 1
+    package=$(dpkg-deb -f "$path" Package 2>/dev/null) || return 1
+    version=$(dpkg-deb -f "$path" Version 2>/dev/null) || return 1
+    architecture=$(dpkg-deb -f "$path" Architecture 2>/dev/null) || return 1
+    [[ "$package" == "$FCITX5_LOTUS_PACKAGE" ]] || return 1
+    [[ "$version" == "$expected_version" ]] || return 1
+    [[ "$architecture" == "$FCITX5_LOTUS_ARCH" ]]
+}
+
 validate_chrome_apt_source() {
     local source_file=$1
     [[ -f "$source_file" ]] || return 1
@@ -262,6 +313,21 @@ validate_chrome_apt_source() {
         grep -qx "Architectures: $GOOGLE_CHROME_ARCH" "$source_file" || return 1
     [[ "$(grep -c '^Signed-By:' "$source_file")" == 1 ]] &&
         grep -qx 'Signed-By: /usr/share/keyrings/google-chrome.gpg' "$source_file"
+}
+
+validate_fcitx5_lotus_apt_source() {
+    local source_file=$1
+    local repository="$FCITX5_LOTUS_APT_ROOT/$UBUNTU_CODENAME"
+    [[ -f "$source_file" ]] || return 1
+    cmp -s "$source_file" <(cat <<EOF
+Types: deb
+URIs: $repository
+Suites: $UBUNTU_CODENAME
+Components: main
+Architectures: $FCITX5_LOTUS_ARCH
+Signed-By: /usr/share/keyrings/fcitx5-lotus.gpg
+EOF
+    )
 }
 
 package_file_hash() {
@@ -290,7 +356,7 @@ git_dirty() {
 }
 
 build_id() {
-    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|${ONLYOFFICE_DEB_SHA256:-unresolved}|$(git_revision)" |
+    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|${ONLYOFFICE_DEB_SHA256:-unresolved}|${FCITX5_LOTUS_DEB_SHA256:-unresolved}|$(git_revision)" |
         sha256sum | cut -c1-16
 }
 

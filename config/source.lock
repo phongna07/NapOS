@@ -23,3 +23,11 @@ ONLYOFFICE_APT_URL="https://download.onlyoffice.com/repo/debian"
 ONLYOFFICE_APT_SUITE="squeeze"
 ONLYOFFICE_SIGNING_KEY_URL="https://download.onlyoffice.com/GPG-KEY-ONLYOFFICE"
 ONLYOFFICE_SIGNING_FINGERPRINT="E09CA29F6E178040EF22B4098320CA65CB2DE8E5"
+
+# Authenticated Fcitx5 Lotus input. The Ubuntu codename is appended to the
+# repository root for both the repository path and suite.
+FCITX5_LOTUS_PACKAGE="fcitx5-lotus"
+FCITX5_LOTUS_ARCH="amd64"
+FCITX5_LOTUS_APT_ROOT="https://fcitx5-lotus.pages.dev/apt"
+FCITX5_LOTUS_SIGNING_KEY_URL="https://fcitx5-lotus.pages.dev/pubkey.gpg"
+FCITX5_LOTUS_SIGNING_FINGERPRINT="321E097BA44B5A53DB8BA81D55991878A14D5828"

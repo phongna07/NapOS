@@ -6,13 +6,11 @@
 - [x] Remove libreoffice
 - [x] remove celluloid media player
 - [x] Chrome
-- [ ] fcitx5-lotus
+- [x] fcitx5-lotus
 - [ ] ttf-mscorefonts-installer
 - [x] OnlyOffice
-- [ ] Okular
 - [ ] unrar, p7zip-full
 - [ ] Zalo appimage
-- [ ] zsh shell
 - [x] config vlc media player as the default
 - [ ] clipboard history
 - [ ] add desktop icons and taskbar icons

@@ -29,10 +29,14 @@ Confirm the output shows:
   `E09CA29F6E178040EF22B4098320CA65CB2DE8E5`.
 - An ONLYOFFICE Desktop Editors amd64 version whose official website `.deb`
   matches ONLYOFFICE's signed repository metadata.
+- Fcitx5 Lotus signing fingerprint
+  `321E097BA44B5A53DB8BA81D55991878A14D5828`.
+- An Fcitx5 Lotus amd64 version whose `.deb` matches the signed Noble repository
+  metadata.
 - An authenticated ISO below `cache/downloads/`.
 
-A second invocation should reuse the ISO and still-current authenticated Chrome
-and ONLYOFFICE packages. Vendor metadata is refreshed on every fetch so newly
+A second invocation should reuse the ISO and still-current authenticated Chrome,
+ONLYOFFICE, and Fcitx5 Lotus packages. Vendor metadata is refreshed on every fetch so newly
 released stable packages are selected automatically. If a cached package no
 longer matches, the workflow quarantines it and downloads a new copy.
 
@@ -77,6 +81,10 @@ Verification requires:
   official APT source, and signing key inside the live SquashFS.
 - The resolved `onlyoffice-desktopeditors` version, executable, desktop
   launcher, and Microsoft Office MIME declarations inside the live SquashFS.
+- The resolved `fcitx5-lotus` version, signing key, constrained APT source,
+  input-method descriptor, Fcitx5 configuration tool, and GTK/Qt frontends.
+- System-wide Fcitx5 environment variables and autostart, an English-first
+  profile containing Lotus, and the per-login Lotus server bridge.
 - ONLYOFFICE assigned to Word, Excel, PowerPoint, RTF, and CSV formats in both
   system MIME policies while existing PDF and OpenDocument defaults remain
   unchanged.
@@ -86,14 +94,16 @@ Verification requires:
   installed system retains Chrome.
 - No `onlyoffice-desktopeditors` entry in `filesystem.manifest-remove`, so the
   installed system retains ONLYOFFICE.
+- No `fcitx5-lotus` entry in `filesystem.manifest-remove`, so the installed
+  system retains Lotus.
 - An unchanged `filesystem.manifest-remove` from the authenticated Mint ISO.
   Its Firefox locale entries are preserved upstream installer metadata and do
   not indicate that those packages remain in the customized SquashFS.
 
 Inspection prints the SquashFS compression and the adjacent provenance JSON.
-The JSON records the exact Chrome and ONLYOFFICE versions, SHA-256 values,
-repository package paths, signing fingerprints, and package-removal policy hash
-used by the build.
+The JSON records the exact Chrome, ONLYOFFICE, and Fcitx5 Lotus versions,
+SHA-256 values, repository package paths, signing fingerprints, and
+package-removal policy hash used by the build.
 
 ## 5. Release build
 

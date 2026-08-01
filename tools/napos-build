@@ -23,6 +23,12 @@ ONLYOFFICE_VERSION=""
 ONLYOFFICE_DEB_SHA256=""
 ONLYOFFICE_DEB_SIZE=""
 ONLYOFFICE_REPOSITORY_PACKAGE_PATH=""
+FCITX5_LOTUS_DEB_PATH=""
+FCITX5_LOTUS_KEY_PATH=""
+FCITX5_LOTUS_VERSION=""
+FCITX5_LOTUS_DEB_SHA256=""
+FCITX5_LOTUS_DEB_SIZE=""
+FCITX5_LOTUS_REPOSITORY_PACKAGE_PATH=""
 
 cleanup_temp_paths() {
     local path
@@ -78,7 +84,7 @@ Usage:
 
 Preferred interface:
   make doctor   Validate WSL2/GitHub Ubuntu, tools, storage, sudo, and mounts
-  make fetch    Authenticate and cache Linux Mint, Chrome, and ONLYOFFICE
+  make fetch    Authenticate and cache Linux Mint, Chrome, ONLYOFFICE, and Fcitx5 Lotus
   make dev      Build and verify an LZ4 development ISO
   make release  Build and verify an XZ release ISO
   make verify ISO=dist/NapOS-...iso
@@ -86,8 +92,8 @@ Preferred interface:
   make test     Run non-networked safety and branding checks
 
 Generated files are written below dist/. Builds are not byte-reproducible
-because package versions are resolved from live Mint, Ubuntu, Google, and
-ONLYOFFICE repositories.
+because package versions are resolved from live Mint, Ubuntu, Google,
+ONLYOFFICE, and Fcitx5 Lotus repositories.
 
 Development artifacts:
   dist/NapOS-${NAPOS_VERSION}-dev-${NAPOS_EDITION}-${NAPOS_ARCH}.iso
@@ -536,6 +542,122 @@ fetch_onlyoffice() {
     die "Unable to authenticate a consistent ONLYOFFICE stable package after 3 attempts."
 }
 
+quarantine_fcitx5_lotus_file() {
+    local path=$1
+    local quarantine
+    [[ -f "$path" ]] || return 0
+    quarantine="${path}.invalid.$(date -u +%Y%m%dT%H%M%SZ)"
+    mv -- "$path" "$quarantine"
+    warn "Quarantined an invalid Fcitx5 Lotus input at $quarantine"
+}
+
+fetch_fcitx5_lotus_deb() {
+    local url=$1
+    local destination=$2
+    local expected_version=$3
+    local expected_sha256=$4
+    local expected_size=$5
+    local part="${destination}.part"
+
+    if [[ -f "$destination" ]]; then
+        if validate_fcitx5_lotus_deb "$destination" "$expected_version" \
+            "$expected_sha256" "$expected_size"; then
+            ok "Using authenticated cached Fcitx5 Lotus $expected_version."
+            return 0
+        fi
+        quarantine_fcitx5_lotus_file "$destination"
+    fi
+
+    mkdir -p "$(dirname "$destination")"
+    if [[ -f "$part" ]]; then
+        quarantine_fcitx5_lotus_file "$part"
+    fi
+    log "Downloading Fcitx5 Lotus $expected_version..."
+    download_transient "$url" "$part" || return 1
+    if ! validate_fcitx5_lotus_deb "$part" "$expected_version" \
+        "$expected_sha256" "$expected_size"; then
+        quarantine_fcitx5_lotus_file "$part"
+        return 1
+    fi
+    mv -- "$part" "$destination"
+    ok "Fcitx5 Lotus .deb matches signed repository metadata."
+}
+
+fetch_fcitx5_lotus_attempt() {
+    local temp gnupg_home armored_key keyring inrelease packages status_file repository
+    local actual_primary valid_primary release_metadata packages_sha256 packages_size
+    local package_metadata package_filename package_url destination packages_path cached_key cached_key_part
+
+    temp=$(with_temp_dir)
+    TEMP_PATHS+=("$temp")
+    gnupg_home="$temp/gnupg"
+    armored_key="$temp/fcitx5-lotus.asc"
+    keyring="$temp/fcitx5-lotus.gpg"
+    inrelease="$temp/InRelease"
+    packages="$temp/Packages"
+    status_file="$temp/gpg.status"
+    repository="$FCITX5_LOTUS_APT_ROOT/$UBUNTU_CODENAME"
+    packages_path="main/binary-$FCITX5_LOTUS_ARCH/Packages"
+    mkdir -m 0700 "$gnupg_home"
+
+    download_transient "$FCITX5_LOTUS_SIGNING_KEY_URL" "$armored_key" || return 1
+    actual_primary=$(primary_key_fingerprint "$armored_key") || return 1
+    [[ "$(trim_fingerprint "$actual_primary")" == \
+        "$(trim_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT")" ]] || return 1
+    gpg --homedir "$gnupg_home" --batch --import "$armored_key" >/dev/null 2>&1 || return 1
+    gpg --batch --yes --dearmor --output "$keyring" "$armored_key" || return 1
+
+    download_transient "$repository/dists/$UBUNTU_CODENAME/InRelease" "$inrelease" || return 1
+    gpg --homedir "$gnupg_home" --batch --status-fd 1 --verify "$inrelease" \
+        >"$status_file" 2>/dev/null || return 1
+    valid_primary=$(awk '$2 == "VALIDSIG" { print $NF; exit }' "$status_file")
+    [[ "$(trim_fingerprint "$valid_primary")" == \
+        "$(trim_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT")" ]] || return 1
+
+    release_metadata=$(release_file_metadata "$inrelease" "$packages_path") || return 1
+    IFS=$'\t' read -r packages_sha256 packages_size <<<"$release_metadata"
+    download_transient "$repository/dists/$UBUNTU_CODENAME/$packages_path" "$packages" || return 1
+    verify_file_sha256_and_size "$packages" "$packages_sha256" "$packages_size" || return 1
+
+    package_metadata=$(fcitx5_lotus_package_metadata "$packages") || return 1
+    IFS=$'\t' read -r FCITX5_LOTUS_VERSION package_filename \
+        FCITX5_LOTUS_DEB_SHA256 FCITX5_LOTUS_DEB_SIZE <<<"$package_metadata"
+    [[ "$package_filename" == pool/main/f/fcitx5-lotus/*.deb ]] || return 1
+    package_url="$repository/$package_filename"
+    destination="$FCITX5_LOTUS_DOWNLOAD_DIR/$FCITX5_LOTUS_DEB_SHA256/$(basename "$package_filename")"
+    fetch_fcitx5_lotus_deb "$package_url" "$destination" "$FCITX5_LOTUS_VERSION" \
+        "$FCITX5_LOTUS_DEB_SHA256" "$FCITX5_LOTUS_DEB_SIZE" || return 1
+
+    mkdir -p "$FCITX5_LOTUS_DOWNLOAD_DIR"
+    cached_key="$FCITX5_LOTUS_DOWNLOAD_DIR/fcitx5-lotus-${FCITX5_LOTUS_SIGNING_FINGERPRINT}.gpg"
+    cached_key_part="${cached_key}.part"
+    if [[ -f "$cached_key" ]] &&
+        [[ "$(trim_fingerprint "$(primary_key_fingerprint "$cached_key")")" != \
+            "$(trim_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT")" ]]; then
+        quarantine_fcitx5_lotus_file "$cached_key"
+    fi
+    cp -- "$keyring" "$cached_key_part"
+    chmod 0644 "$cached_key_part"
+    mv -- "$cached_key_part" "$cached_key"
+
+    FCITX5_LOTUS_DEB_PATH=$destination
+    FCITX5_LOTUS_KEY_PATH=$cached_key
+    FCITX5_LOTUS_REPOSITORY_PACKAGE_PATH=$package_filename
+    ok "Authenticated Fcitx5 Lotus signing fingerprint: $actual_primary"
+    ok "Resolved Fcitx5 Lotus: $FCITX5_LOTUS_VERSION"
+}
+
+fetch_fcitx5_lotus() {
+    local attempt
+    for attempt in 1 2 3; do
+        if fetch_fcitx5_lotus_attempt; then
+            return 0
+        fi
+        warn "Fcitx5 Lotus metadata/package resolution attempt $attempt of 3 failed."
+    done
+    die "Unable to authenticate a consistent Fcitx5 Lotus package after 3 attempts."
+}
+
 cmd_fetch() {
     local manifest="$DOWNLOAD_DIR/sha256sum.txt"
     local signature="$DOWNLOAD_DIR/sha256sum.txt.gpg"
@@ -568,6 +690,7 @@ cmd_fetch() {
     ok "Authenticated base ISO: $iso"
     fetch_google_chrome
     fetch_onlyoffice
+    fetch_fcitx5_lotus
 }
 
 base_iso_path() {
@@ -731,9 +854,11 @@ mount_chroot() {
 }
 
 install_packages_and_hooks() {
-    local hook hook_name
+    local hook hook_name command
     [[ -f "$CHROME_DEB_PATH" ]] || die "Authenticated Google Chrome package is unavailable."
     [[ -f "$ONLYOFFICE_DEB_PATH" ]] || die "Authenticated ONLYOFFICE package is unavailable."
+    [[ -f "$FCITX5_LOTUS_DEB_PATH" ]] || die "Authenticated Fcitx5 Lotus package is unavailable."
+    [[ -f "$FCITX5_LOTUS_KEY_PATH" ]] || die "Authenticated Fcitx5 Lotus keyring is unavailable."
     save_and_enable_dns
     printf '#!/bin/sh\nexit 101\n' | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" >/dev/null
     sudo chmod 0755 "$ROOTFS/usr/sbin/policy-rc.d"
@@ -741,6 +866,14 @@ install_packages_and_hooks() {
     sudo install -m 0644 "$CONFIG_DIR/packages-remove.txt" "$ROOTFS/tmp/napos-packages-remove.txt"
     sudo install -m 0644 "$CHROME_DEB_PATH" "$ROOTFS/tmp/napos-google-chrome.deb"
     sudo install -m 0644 "$ONLYOFFICE_DEB_PATH" "$ROOTFS/tmp/napos-onlyoffice.deb"
+    sudo install -m 0644 "$FCITX5_LOTUS_DEB_PATH" "$ROOTFS/tmp/napos-fcitx5-lotus.deb"
+    sudo mkdir -p "$ROOTFS/usr/share/keyrings"
+    sudo install -m 0644 "$FCITX5_LOTUS_KEY_PATH" "$ROOTFS/usr/share/keyrings/fcitx5-lotus.gpg"
+    sudo mkdir -p "$ROOTFS/tmp/napos-maintscript-bin"
+    for command in modprobe udevadm systemctl killall; do
+        printf '#!/bin/sh\nexit 0\n' | sudo tee "$ROOTFS/tmp/napos-maintscript-bin/$command" >/dev/null
+        sudo chmod 0755 "$ROOTFS/tmp/napos-maintscript-bin/$command"
+    done
     sudo mkdir -p "$ROOTFS/tmp/napos-hooks"
     if compgen -G "$CONFIG_DIR/hooks/*.sh" >/dev/null; then
         sudo cp "$CONFIG_DIR"/hooks/*.sh "$ROOTFS/tmp/napos-hooks/"
@@ -756,6 +889,10 @@ install_packages_and_hooks() {
                 xargs -r apt-get install -y --no-install-recommends
             apt-get install -y --no-install-recommends /tmp/napos-google-chrome.deb
             apt-get install -y --no-install-recommends /tmp/napos-onlyoffice.deb
+            /usr/bin/env LOGNAME=root PATH=/tmp/napos-maintscript-bin:/usr/sbin:/usr/bin:/sbin:/bin \
+                apt-get install -y --no-install-recommends /tmp/napos-fcitx5-lotus.deb
+            systemd-sysusers
+            rm -f /etc/systemd/system/multi-user.target.wants/fcitx5-lotus-server@root.service
             sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/napos-packages-remove.txt |
                 xargs -r apt-get purge -y --
         '
@@ -781,7 +918,8 @@ install_packages_and_hooks() {
 
 validate_customized_rootfs() {
     local package chrome_key_fingerprint chrome_source dconf_data base_reference
-    local packages=(vlc flameshot git curl htop vim)
+    local lotus_key_fingerprint lotus_source
+    local packages=(vlc flameshot git curl htop vim fcitx5 fcitx5-config-qt fcitx5-frontend-all)
     local remove_packages=()
     mapfile -t remove_packages < <(
         sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$CONFIG_DIR/packages-remove.txt"
@@ -811,6 +949,37 @@ validate_customized_rootfs() {
         [[ -f /usr/share/applications/vlc.desktop ]]
         [[ -x /usr/bin/onlyoffice-desktopeditors ]]
         [[ -f /usr/share/applications/onlyoffice-desktopeditors.desktop ]]
+        [[ -x /usr/bin/fcitx5 ]]
+        [[ -x /usr/bin/fcitx5-config-qt ]]
+        [[ -f /usr/share/applications/org.fcitx.fcitx5-config-qt.desktop ]]
+        [[ -x /usr/bin/fcitx5-lotus-server ]]
+        [[ -x /usr/bin/fcitx5-lotus-settings ]]
+        [[ -f /usr/lib/x86_64-linux-gnu/fcitx5/liblotus.so ]]
+        [[ -f /usr/share/fcitx5/addon/lotus.conf ]]
+        grep -qx "Name=Lotus" /usr/share/fcitx5/inputmethod/lotus.conf
+        [[ -f /etc/xdg/autostart/org.fcitx.Fcitx5.desktop ]]
+        grep -q "^Exec=.*/fcitx5$" /etc/xdg/autostart/org.fcitx.Fcitx5.desktop
+        [[ -x /usr/libexec/napos-fcitx5-lotus-user ]]
+        [[ -f /etc/systemd/system/user@.service.d/50-napos-fcitx5-lotus.conf ]]
+        grep -Fqx "Wants=fcitx5-lotus-server@%i.service" \
+            /etc/systemd/system/user@.service.d/50-napos-fcitx5-lotus.conf
+        [[ -f /etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf ]]
+        grep -Fqx "ExecCondition=/usr/libexec/napos-fcitx5-lotus-user --check %i" \
+            /etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf
+        grep -Fqx "ExecStart=/usr/libexec/napos-fcitx5-lotus-user --exec %i" \
+            /etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf
+        [[ ! -e /etc/systemd/system/multi-user.target.wants/fcitx5-lotus-server@root.service ]]
+        [[ -f /etc/skel/.config/fcitx5/profile ]]
+        grep -qx "Name=keyboard-us" /etc/skel/.config/fcitx5/profile
+        grep -qx "Name=lotus" /etc/skel/.config/fcitx5/profile
+        grep -qx "DefaultIM=lotus" /etc/skel/.config/fcitx5/profile
+        grep -qx "ActiveByDefault=False" /etc/skel/.config/fcitx5/config
+        grep -qx "XMODIFIERS=@im=fcitx" /etc/environment
+        grep -qx "GTK_IM_MODULE=fcitx" /etc/environment
+        grep -qx "QT_IM_MODULE=fcitx" /etc/environment
+        grep -qx "SDL_IM_MODULE=fcitx" /etc/environment
+        grep -qx "GLFW_IM_MODULE=ibus" /etc/environment
+        ! compgen -G "/etc/xdg/autostart/ibus*" >/dev/null
         [[ ! -e /etc/apt/sources.list.d/onlyoffice.list ]]
         [[ ! -e /etc/apt/sources.list.d/onlyoffice.sources ]]
         [[ ! -e /usr/bin/firefox ]]
@@ -874,21 +1043,32 @@ validate_customized_rootfs() {
         grep -Rqs "Name\[vi\]=Cài đặt NapOS" /usr/share/applications
         grep -Rqs "Icon=napos-logo" /usr/share/applications
     '
+    sudo cmp -s "$ROOTFS/etc/skel/.config/fcitx5/profile" \
+        "$CONFIG_DIR/overlay/etc/skel/.config/fcitx5/profile" ||
+        die "Installed Fcitx5 profile differs from the English-first Lotus default."
     dconf_data=$(sudo cat "$ROOTFS/etc/dconf/db/local.d/00-napos")
     validate_cinnamon_panel_defaults "$dconf_data" ||
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     base_reference=$(base_reference_root)
     sudo cmp -s "$ROOTFS/etc/lsb-release" "$base_reference/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
-    sudo diff -qr --exclude=google-chrome.sources \
+    sudo diff -qr --exclude=google-chrome.sources --exclude=fcitx5-lotus.sources \
         "$ROOTFS/etc/apt" "$base_reference/etc/apt" >/dev/null ||
-        die "Mint APT configuration changed outside the approved Google Chrome source."
+        die "Mint APT configuration changed outside the approved Chrome and Fcitx5 Lotus sources."
     chrome_source="$ROOTFS/etc/apt/sources.list.d/google-chrome.sources"
     [[ -f "$chrome_source" ]] || die "Google Chrome APT source is missing."
     validate_chrome_apt_source "$chrome_source" || die "Unexpected Google Chrome APT source configuration."
     chrome_key_fingerprint=$(primary_key_fingerprint "$ROOTFS/usr/share/keyrings/google-chrome.gpg")
     [[ "$(trim_fingerprint "$chrome_key_fingerprint")" == "$(trim_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT")" ]] ||
         die "Installed Google Chrome keyring fingerprint mismatch: $chrome_key_fingerprint"
+    lotus_source="$ROOTFS/etc/apt/sources.list.d/fcitx5-lotus.sources"
+    [[ -f "$lotus_source" ]] || die "Fcitx5 Lotus APT source is missing."
+    validate_fcitx5_lotus_apt_source "$lotus_source" ||
+        die "Unexpected Fcitx5 Lotus APT source configuration."
+    lotus_key_fingerprint=$(primary_key_fingerprint "$ROOTFS/usr/share/keyrings/fcitx5-lotus.gpg")
+    [[ "$(trim_fingerprint "$lotus_key_fingerprint")" == \
+        "$(trim_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT")" ]] ||
+        die "Installed Fcitx5 Lotus keyring fingerprint mismatch: $lotus_key_fingerprint"
     for package in "${packages[@]}"; do
         sudo chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$package" | grep -q '^ii' ||
             die "Expected package is not installed: $package"
@@ -907,6 +1087,13 @@ validate_customized_rootfs() {
         die "Expected package is not installed: $ONLYOFFICE_PACKAGE"
     [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${Version}' "$ONLYOFFICE_PACKAGE")" == "$ONLYOFFICE_VERSION" ]] ||
         die "Installed ONLYOFFICE version differs from authenticated package metadata."
+    [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$FCITX5_LOTUS_PACKAGE")" == ii* ]] ||
+        die "Expected package is not installed: $FCITX5_LOTUS_PACKAGE"
+    [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${Version}' "$FCITX5_LOTUS_PACKAGE")" == \
+        "$FCITX5_LOTUS_VERSION" ]] ||
+        die "Installed Fcitx5 Lotus version differs from authenticated package metadata."
+    [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' ibus)" == ii* ]] ||
+        die "IBus compatibility packages were unexpectedly purged."
     if sudo grep -Rqs --exclude='napos-build' 'Napos' \
         "$ROOTFS/etc/napos-release" "$ROOTFS/usr/lib/os-release" \
         "$ROOTFS/usr/share/applications"; then
@@ -921,7 +1108,8 @@ clean_chroot() {
         apt-get clean
         rm -rf /var/lib/apt/lists/* /tmp/napos-hooks /tmp/napos-packages.txt \
             /tmp/napos-packages-remove.txt /tmp/napos-google-chrome.deb \
-            /tmp/napos-onlyoffice.deb
+            /tmp/napos-onlyoffice.deb /tmp/napos-fcitx5-lotus.deb \
+            /tmp/napos-maintscript-bin
         rm -f /usr/sbin/policy-rc.d /var/lib/dbus/machine-id
         : > /etc/machine-id
     '
@@ -973,7 +1161,7 @@ release_github_rootfs() {
 release_github_intermediates() {
     check_github_actions_ubuntu || return 0
     safe_remove_tree "$ISO_TREE" "$WORK_DIR"
-    for path in "$CHROME_DOWNLOAD_DIR" "$ONLYOFFICE_DOWNLOAD_DIR"; do
+    for path in "$CHROME_DOWNLOAD_DIR" "$ONLYOFFICE_DOWNLOAD_DIR" "$FCITX5_LOTUS_DOWNLOAD_DIR"; do
         [[ -e "$path" ]] || continue
         safe_remove_tree "$path" "$CACHE_DIR"
     done
@@ -1031,6 +1219,14 @@ write_build_info() {
         --arg onlyoffice_repository_suite "$ONLYOFFICE_APT_SUITE" \
         --arg onlyoffice_repository_package_path "$ONLYOFFICE_REPOSITORY_PACKAGE_PATH" \
         --arg onlyoffice_signing_fingerprint "$ONLYOFFICE_SIGNING_FINGERPRINT" \
+        --arg lotus_package "$FCITX5_LOTUS_PACKAGE" \
+        --arg lotus_version "$FCITX5_LOTUS_VERSION" \
+        --arg lotus_architecture "$FCITX5_LOTUS_ARCH" \
+        --arg lotus_sha256 "$FCITX5_LOTUS_DEB_SHA256" \
+        --arg lotus_repository "$FCITX5_LOTUS_APT_ROOT/$UBUNTU_CODENAME" \
+        --arg lotus_repository_suite "$UBUNTU_CODENAME" \
+        --arg lotus_repository_package_path "$FCITX5_LOTUS_REPOSITORY_PACKAGE_PATH" \
+        --arg lotus_signing_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT" \
         --arg timestamp "$BUILD_TIMESTAMP" \
         --arg xorriso_version "$(xorriso -version 2>&1 | head -n1)" \
         --arg squashfs_version "$(unsquashfs -version 2>&1 | head -n1)" \
@@ -1048,7 +1244,12 @@ write_build_info() {
                     architecture:$onlyoffice_architecture, url:$onlyoffice_url, sha256:$onlyoffice_sha256,
                     repository:$onlyoffice_repository, repository_suite:$onlyoffice_repository_suite,
                     repository_package_path:$onlyoffice_repository_package_path,
-                    signing_fingerprint:$onlyoffice_signing_fingerprint}},
+                    signing_fingerprint:$onlyoffice_signing_fingerprint},
+                  fcitx5_lotus:{package:$lotus_package, version:$lotus_version,
+                    architecture:$lotus_architecture, sha256:$lotus_sha256,
+                    repository:$lotus_repository, repository_suite:$lotus_repository_suite,
+                    repository_package_path:$lotus_repository_package_path,
+                    signing_fingerprint:$lotus_signing_fingerprint}},
           built_at:$timestamp, tools:{xorriso:$xorriso_version, squashfs:$squashfs_version},
           duration_seconds:$duration_seconds, byte_reproducible:false}' >"$info"
 }
@@ -1117,6 +1318,8 @@ cmd_verify() {
     local squashfs_report compression expected_compression base_iso
     local build_info chrome_source_file chrome_key_file chrome_key_fingerprint chrome_version
     local onlyoffice_version onlyoffice_launcher office_mime
+    local lotus_source_file lotus_key_file lotus_key_fingerprint lotus_version
+    local fcitx_environment fcitx_profile fcitx_config lotus_user_unit lotus_server_unit
     local mimeapps mint_mimeapps grouped_window_list panel_launchers application_defaults launcher_defaults
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
@@ -1175,6 +1378,17 @@ cmd_verify() {
     chrome_key_fingerprint=$(primary_key_fingerprint "$chrome_key_file")
     [[ "$(trim_fingerprint "$chrome_key_fingerprint")" == "$(trim_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT")" ]] ||
         die "Google Chrome APT keyring fingerprint mismatch: $chrome_key_fingerprint"
+    lotus_source_file="$temp/fcitx5-lotus.sources"
+    lotus_key_file="$temp/fcitx5-lotus.gpg"
+    unsquashfs -cat "$temp/filesystem.squashfs" etc/apt/sources.list.d/fcitx5-lotus.sources \
+        >"$lotus_source_file" 2>/dev/null || die "Fcitx5 Lotus APT source is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/keyrings/fcitx5-lotus.gpg \
+        >"$lotus_key_file" 2>/dev/null || die "Fcitx5 Lotus APT keyring is missing."
+    validate_fcitx5_lotus_apt_source "$lotus_source_file" || die "Fcitx5 Lotus APT source is invalid."
+    lotus_key_fingerprint=$(primary_key_fingerprint "$lotus_key_file")
+    [[ "$(trim_fingerprint "$lotus_key_fingerprint")" == \
+        "$(trim_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT")" ]] ||
+        die "Fcitx5 Lotus APT keyring fingerprint mismatch: $lotus_key_fingerprint"
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/google-chrome.desktop >/dev/null 2>&1 ||
         die "Google Chrome desktop launcher is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/vlc.desktop >/dev/null 2>&1 ||
@@ -1192,6 +1406,65 @@ cmd_verify() {
         grep -q 'usr/bin/google-chrome-stable' || die "Google Chrome executable is missing."
     unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/onlyoffice-desktopeditors 2>/dev/null |
         grep -q 'usr/bin/onlyoffice-desktopeditors' || die "ONLYOFFICE executable is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/fcitx5-lotus-server 2>/dev/null |
+        grep -q 'usr/bin/fcitx5-lotus-server' || die "Fcitx5 Lotus server is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/fcitx5-lotus-settings 2>/dev/null |
+        grep -q 'usr/bin/fcitx5-lotus-settings' || die "Fcitx5 Lotus settings tool is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/lib/x86_64-linux-gnu/fcitx5/liblotus.so 2>/dev/null |
+        grep -q 'usr/lib/x86_64-linux-gnu/fcitx5/liblotus.so' || die "Fcitx5 Lotus addon is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/fcitx5-config-qt 2>/dev/null |
+        grep -q 'usr/bin/fcitx5-config-qt' || die "Fcitx5 configuration tool is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/applications/org.fcitx.fcitx5-config-qt.desktop >/dev/null 2>&1 ||
+        die "Fcitx5 Configuration menu entry is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/libexec/napos-fcitx5-lotus-user 2>/dev/null |
+        grep -q 'usr/libexec/napos-fcitx5-lotus-user' || die "Fcitx5 Lotus user resolver is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/fcitx5/addon/lotus.conf 2>/dev/null |
+        grep -qx 'Library=liblotus' || die "Fcitx5 Lotus addon descriptor is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/fcitx5/inputmethod/lotus.conf 2>/dev/null |
+        grep -qx 'Name=Lotus' || die "Fcitx5 Lotus input-method descriptor is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" etc/xdg/autostart/org.fcitx.Fcitx5.desktop \
+        >/dev/null 2>&1 || die "Fcitx5 global autostart entry is missing."
+    fcitx_environment=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/environment 2>/dev/null) ||
+        die "System environment configuration is missing."
+    fcitx_profile=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/skel/.config/fcitx5/profile 2>/dev/null) ||
+        die "Fcitx5 default profile is missing."
+    fcitx_config=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/skel/.config/fcitx5/config 2>/dev/null) ||
+        die "Fcitx5 default behavior is missing."
+    lotus_user_unit=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        etc/systemd/system/user@.service.d/50-napos-fcitx5-lotus.conf 2>/dev/null) ||
+        die "Fcitx5 Lotus user service dependency is missing."
+    lotus_server_unit=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf 2>/dev/null) ||
+        die "Fcitx5 Lotus server override is missing."
+    for setting in \
+        'XMODIFIERS=@im=fcitx' \
+        'GTK_IM_MODULE=fcitx' \
+        'QT_IM_MODULE=fcitx' \
+        'SDL_IM_MODULE=fcitx' \
+        'GLFW_IM_MODULE=ibus'; do
+        grep -qx "$setting" <<<"$fcitx_environment" || die "Fcitx5 environment setting is missing: $setting"
+    done
+    grep -qx 'DefaultIM=lotus' <<<"$fcitx_profile" || die "Lotus is not the default configured input method."
+    grep -qx 'Name=keyboard-us' <<<"$fcitx_profile" || die "The English keyboard is absent from the Fcitx5 profile."
+    grep -qx 'Name=lotus' <<<"$fcitx_profile" || die "Lotus is absent from the Fcitx5 profile."
+    [[ "$fcitx_profile" == $'[Groups/0]\nName=Default\nDefault Layout=us\nDefaultIM=lotus\n\n[Groups/0/Items/0]\nName=keyboard-us\nLayout=\n\n[Groups/0/Items/1]\nName=lotus\nLayout=\n\n[GroupOrder]\n0=Default' ]] ||
+        die "The Fcitx5 profile does not list the English keyboard before Lotus."
+    grep -qx 'ActiveByDefault=False' <<<"$fcitx_config" || die "Fcitx5 does not start in English mode."
+    grep -Fqx 'Wants=fcitx5-lotus-server@%i.service' <<<"$lotus_user_unit" ||
+        die "Lotus is not coupled to systemd user startup."
+    grep -Fqx 'ExecCondition=/usr/libexec/napos-fcitx5-lotus-user --check %i' <<<"$lotus_server_unit" ||
+        die "Lotus user eligibility checking is missing."
+    grep -Fqx 'ExecStart=/usr/libexec/napos-fcitx5-lotus-user --exec %i' <<<"$lotus_server_unit" ||
+        die "Lotus UID-to-username resolution is missing."
+    if unsquashfs -cat "$temp/filesystem.squashfs" \
+        etc/systemd/system/multi-user.target.wants/fcitx5-lotus-server@root.service >/dev/null 2>&1; then
+        die "Fcitx5 Lotus is incorrectly enabled for root."
+    fi
+    if unsquashfs -ll "$temp/filesystem.squashfs" etc/xdg/autostart 2>/dev/null |
+        grep -Eq 'etc/xdg/autostart/ibus[^/]*$'; then
+        die "An IBus autostart entry remains enabled."
+    fi
     if unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/firefox.desktop \
         >/dev/null 2>&1; then
         die "Firefox desktop launcher is present."
@@ -1300,7 +1573,8 @@ cmd_verify() {
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/backgrounds/napos/napos-wallpaper.svg >/dev/null 2>&1 || die "NapOS wallpaper is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/icons/hicolor/scalable/apps/napos-logo.svg >/dev/null 2>&1 || die "NapOS logo is missing."
 
-    for package in vlc flameshot git curl htop vim "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE"; do
+    for package in vlc flameshot git curl htop vim ibus fcitx5 fcitx5-config-qt fcitx5-frontend-all \
+        "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
         grep -Eq "^${package} " "$temp/filesystem.manifest" || die "Package is absent from filesystem.manifest: $package"
     done
     while IFS= read -r package; do
@@ -1319,6 +1593,12 @@ cmd_verify() {
     [[ -n "$onlyoffice_version" ]] || die "ONLYOFFICE version is absent from filesystem.manifest."
     if grep -Eq "^${ONLYOFFICE_PACKAGE}([[:space:]]|$)" "$temp/filesystem.manifest-remove"; then
         die "ONLYOFFICE is listed for removal by the live installer."
+    fi
+    lotus_version=$(awk -v wanted="$FCITX5_LOTUS_PACKAGE" '$1 == wanted { print $2; exit }' \
+        "$temp/filesystem.manifest")
+    [[ -n "$lotus_version" ]] || die "Fcitx5 Lotus version is absent from filesystem.manifest."
+    if grep -Eq "^${FCITX5_LOTUS_PACKAGE}([[:space:]]|$)" "$temp/filesystem.manifest-remove"; then
+        die "Fcitx5 Lotus is listed for removal by the live installer."
     fi
     if grep -q 'Napos' <<<"$napos_release$os_release$installer"; then
         die 'Incorrect product capitalization "Napos" found in the ISO.'
@@ -1370,6 +1650,25 @@ cmd_verify() {
             die "Adjacent provenance has an unexpected ONLYOFFICE signing fingerprint."
         [[ "$(jq -r .source.onlyoffice.sha256 "$build_info")" =~ ^[a-f0-9]{64}$ ]] ||
             die "Adjacent provenance has an invalid ONLYOFFICE SHA-256."
+        [[ "$(jq -r .source.fcitx5_lotus.package "$build_info")" == "$FCITX5_LOTUS_PACKAGE" ]] ||
+            die "Adjacent provenance has an unexpected Fcitx5 Lotus package name."
+        [[ "$(jq -r .source.fcitx5_lotus.version "$build_info")" == "$lotus_version" ]] ||
+            die "Adjacent provenance and Fcitx5 Lotus manifest versions differ."
+        [[ "$(jq -r .source.fcitx5_lotus.architecture "$build_info")" == "$FCITX5_LOTUS_ARCH" ]] ||
+            die "Adjacent provenance has an unexpected Fcitx5 Lotus architecture."
+        [[ "$(jq -r .source.fcitx5_lotus.repository "$build_info")" == \
+            "$FCITX5_LOTUS_APT_ROOT/$UBUNTU_CODENAME" ]] ||
+            die "Adjacent provenance has an unexpected Fcitx5 Lotus repository."
+        [[ "$(jq -r .source.fcitx5_lotus.repository_suite "$build_info")" == "$UBUNTU_CODENAME" ]] ||
+            die "Adjacent provenance has an unexpected Fcitx5 Lotus repository suite."
+        [[ "$(jq -r .source.fcitx5_lotus.repository_package_path "$build_info")" == \
+            pool/main/f/fcitx5-lotus/*.deb ]] ||
+            die "Adjacent provenance has an unexpected Fcitx5 Lotus repository package path."
+        [[ "$(jq -r .source.fcitx5_lotus.signing_fingerprint "$build_info")" == \
+            "$FCITX5_LOTUS_SIGNING_FINGERPRINT" ]] ||
+            die "Adjacent provenance has an unexpected Fcitx5 Lotus signing fingerprint."
+        [[ "$(jq -r .source.fcitx5_lotus.sha256 "$build_info")" =~ ^[a-f0-9]{64}$ ]] ||
+            die "Adjacent provenance has an invalid Fcitx5 Lotus SHA-256."
     fi
     ok "NapOS identity, packages, locale, timezone, artwork, and installer metadata are valid."
     ok "Verified ISO: $iso"
@@ -1390,7 +1689,8 @@ cmd_inspect() {
     printf '\nNapOS release:\n'
     unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
     printf '\nSelected packages:\n'
-    for package in vlc flameshot git curl htop vim "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE"; do
+    for package in vlc flameshot git curl htop vim fcitx5 fcitx5-config-qt fcitx5-frontend-all \
+        "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
         awk -v wanted="$package" '$1 == wanted {print; found=1} END {if (!found) print wanted " (missing)"}' \
             "$temp/filesystem.manifest"
     done

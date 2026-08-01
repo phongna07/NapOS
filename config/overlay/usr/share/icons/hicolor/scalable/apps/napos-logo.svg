@@ -1,4 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <!-- Dark Tech Blue Gradient -->
+    <linearGradient id="napOsBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="50%" stop-color="#1e1b4b" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Layer -->
+  <rect width="100%" height="100%" rx="80" fill="url(#napOsBg)" />
+
+  <!-- Original Logo Paths preserved completely -->
   <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
     <!-- Outer Shield / Circle Boundary Accent (Optional floating orbit) -->
     <circle cx="250" cy="250" r="210" stroke-width="12" stroke-dasharray="800 50" opacity="0.3"/>

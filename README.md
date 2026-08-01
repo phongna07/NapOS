@@ -60,9 +60,10 @@ build-release.log
 
 The artifact is retained for one day to limit storage usage on GitHub Free, so
 download it promptly and verify it with `sha256sum -c`. The workflow cache holds
-only the pinned Mint ISO and its isolated GPG state. Chrome and ONLYOFFICE are
-resolved and authenticated from current signed repository metadata on every
-release; expanded root filesystems and disposable work trees are never cached.
+only the pinned Mint ISO and its isolated GPG state. Chrome, ONLYOFFICE, and
+Fcitx5 Lotus are resolved and authenticated from current signed repository
+metadata on every release; expanded root filesystems and disposable work trees
+are never cached.
 
 GitHub builds use a storage-efficient work path that expands the base directly
 into `work/` and releases large intermediate trees as soon as they are no longer
@@ -75,7 +76,7 @@ commands and their reusable base cache are unchanged.
 | --- | --- |
 | `make help` | Prints the supported interface without network or root access. |
 | `make doctor` | Checks WSL2 or GitHub-hosted Ubuntu, native storage, 30 GiB free space, tools, sudo, and temporary mount capability. |
-| `make fetch` | Authenticates and caches the Mint ISO plus the latest Chrome and ONLYOFFICE amd64 `.deb` files selected through signed repository metadata. |
+| `make fetch` | Authenticates and caches the Mint ISO plus the latest Chrome, ONLYOFFICE, and Fcitx5 Lotus amd64 `.deb` files selected through signed repository metadata. |
 | `make dev` | Fetches current authenticated inputs, then builds and verifies a fresh LZ4 ISO. |
 | `make release` | Fetches current authenticated inputs, then builds and verifies a fresh XZ ISO. |
 | `make verify ISO=...` | Rechecks SHA-256, volume, BIOS/EFI entries, embedded identity, packages, artwork, locale, timezone, and installer launcher. |
@@ -91,14 +92,16 @@ under `dist/`.
 
 1. **Doctor:** fails early if the host cannot safely build an ISO.
 2. **Fetch:** authenticates the signed Mint checksum manifest before trusting
-   the ISO checksum, and authenticates Chrome and ONLYOFFICE through their
-   signed APT metadata and pinned signing-key fingerprints.
+   the ISO checksum, and authenticates Chrome, ONLYOFFICE, and Fcitx5 Lotus
+   through their signed APT metadata and pinned signing-key fingerprints.
 3. **Base cache:** extracts ISO content with `xorriso` and expands SquashFS once
    into a cache keyed by the authenticated ISO hash.
 4. **Fresh work tree:** copies the immutable cache for every build so package
    changes never accumulate across builds.
-5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, Vim, and the
-   authenticated official Google Chrome and ONLYOFFICE `.deb` files; purges
+5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, Vim, Fcitx5 with
+   its GTK/Qt frontends, and the authenticated Google Chrome, ONLYOFFICE, and
+   Fcitx5 Lotus `.deb` files; configures Lotus for every live and installed
+   user; purges
    Firefox and its language packs, Mint Chat, Celluloid, and the complete
    LibreOffice suite; makes Chrome the default browser and ONLYOFFICE the
    default for Microsoft Office, RTF, and CSV files; and applies
@@ -112,9 +115,9 @@ under `dist/`.
 9. **Verify:** inspects the finished ISO before it is handed off for VM tests.
 
 Builds are intentionally not claimed to be byte-reproducible: package versions
-are resolved from live Linux Mint, Ubuntu, Google, and ONLYOFFICE repositories.
+are resolved from live Linux Mint, Ubuntu, Google, ONLYOFFICE, and Fcitx5 Lotus repositories.
 The adjacent JSON records the source and tool inputs for each build, including
-the exact Chrome and ONLYOFFICE versions and SHA-256 values plus hashes of the
+the exact Chrome, ONLYOFFICE, and Fcitx5 Lotus versions and SHA-256 values plus hashes of the
 package installation and removal policies. Repository additions are listed in `config/packages.txt`;
 base-image removals are listed in `config/packages-remove.txt`.
 
@@ -128,7 +131,8 @@ NapOS preserves `ID=linuxmint`, Mint 22.3 codename `zena`, Ubuntu codename
 official signed APT source is added separately so installed systems receive
 browser security updates. ONLYOFFICE is installed from the authenticated
 website `.deb`; its repository is used only to authenticate metadata and is not
-added to the finished system.
+added to the finished system. Fcitx5 Lotus retains its fingerprint-pinned,
+Noble/amd64-only APT source so installed systems receive input-method updates.
 
 ## Testing and recovery
 

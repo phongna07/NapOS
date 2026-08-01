@@ -77,8 +77,8 @@ authenticated base, or `make clean-cache` to recover all build storage.
 ## Stale or unwanted cache
 
 `make fetch` reuses only an ISO matching the signed manifest and committed hash,
-and only Chrome and ONLYOFFICE `.deb` files matching the latest signed vendor
-package metadata.
+and only Chrome, ONLYOFFICE, and Fcitx5 Lotus `.deb` files matching the latest
+signed vendor package metadata.
 Use `make clean-cache` only when no build or fetch is running; it checks locks
 and mount descendants before removing authenticated downloads, the immutable
 base cache, and isolated GPG state. The next `make fetch` downloads and verifies

@@ -29,8 +29,10 @@ validate_config
 pass "Configuration validates with exact NapOS identity"
 
 mapfile -t scripts < <(
-    find "$PROJECT_ROOT/tools" "$PROJECT_ROOT/config/hooks" -type f \
-        \( -name '*.sh' -o -path "$PROJECT_ROOT/tools/napos-build" \) | sort
+    find "$PROJECT_ROOT/tools" "$PROJECT_ROOT/config/hooks" \
+        "$PROJECT_ROOT/config/overlay/usr/libexec" -type f \
+        \( -name '*.sh' -o -path "$PROJECT_ROOT/tools/napos-build" \
+            -o -path "$PROJECT_ROOT/config/overlay/usr/libexec/napos-fcitx5-lotus-user" \) | sort
 )
 for script in "${scripts[@]}"; do
     expect_success "Bash syntax: ${script#"$PROJECT_ROOT/"}" bash -n "$script"
@@ -38,7 +40,8 @@ done
 
 if shellcheck -x "$PROJECT_ROOT/tools/napos-build" "$PROJECT_ROOT/tools/lib/common.sh" \
     "$PROJECT_ROOT/tools/tests/selftest.sh" "$PROJECT_ROOT/tools/ci/reclaim-github-disk.sh" \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" \
+    "$PROJECT_ROOT/config/overlay/usr/libexec/napos-fcitx5-lotus-user"; then
     pass "ShellCheck"
 else
     fail "ShellCheck"
@@ -93,6 +96,14 @@ invalid_onlyoffice_fingerprint_config() (
     validate_config 2>/dev/null
 )
 expect_failure "Invalid ONLYOFFICE signing fingerprint is rejected" invalid_onlyoffice_fingerprint_config
+
+invalid_fcitx5_lotus_fingerprint_config() (
+    # shellcheck disable=SC2030
+    local FCITX5_LOTUS_SIGNING_FINGERPRINT=0000
+    validate_config 2>/dev/null
+)
+expect_failure "Invalid Fcitx5 Lotus signing fingerprint is rejected" \
+    invalid_fcitx5_lotus_fingerprint_config
 
 alternate_version_config() (
     # shellcheck disable=SC2030
@@ -171,6 +182,13 @@ if [[ "$ONLYOFFICE_SIGNING_FINGERPRINT" == "E09CA29F6E178040EF22B4098320CA65CB2D
     pass "ONLYOFFICE signing fingerprint equals the committed pin"
 else
     fail "ONLYOFFICE signing fingerprint equals the committed pin"
+fi
+
+# shellcheck disable=SC2031
+if [[ "$FCITX5_LOTUS_SIGNING_FINGERPRINT" == "321E097BA44B5A53DB8BA81D55991878A14D5828" ]]; then
+    pass "Fcitx5 Lotus signing fingerprint equals the committed pin"
+else
+    fail "Fcitx5 Lotus signing fingerprint equals the committed pin"
 fi
 
 printf 'NapOS checksum fixture\n' >"$safe_root/payload"
@@ -293,6 +311,41 @@ sed 's/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/not-a-sh
 expect_failure "ONLYOFFICE metadata rejects an invalid package SHA-256" \
     onlyoffice_package_metadata "$safe_root/OnlyOffice-Packages-bad-sha"
 
+cat >"$safe_root/Fcitx5-Lotus-Packages" <<'EOF'
+Package: unrelated-package
+Version: 99.0
+Architecture: amd64
+Filename: pool/main/u/unrelated-package.deb
+Size: 10
+SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+Package: fcitx5-lotus
+Version: 3.4.0-1
+Architecture: amd64
+Filename: pool/main/f/fcitx5-lotus/fcitx5-lotus_3.4.0-1_amd64.deb
+Size: 929494
+SHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+EOF
+lotus_metadata=$(fcitx5_lotus_package_metadata "$safe_root/Fcitx5-Lotus-Packages")
+expected_lotus_metadata=$'3.4.0-1\tpool/main/f/fcitx5-lotus/fcitx5-lotus_3.4.0-1_amd64.deb\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\t929494'
+if [[ "$lotus_metadata" == "$expected_lotus_metadata" ]]; then
+    pass "Fcitx5 Lotus metadata resolves the amd64 package"
+else
+    fail "Fcitx5 Lotus metadata resolves the amd64 package"
+fi
+sed 's/Architecture: amd64/Architecture: arm64/g' "$safe_root/Fcitx5-Lotus-Packages" \
+    >"$safe_root/Fcitx5-Lotus-Packages-wrong-arch"
+expect_failure "Fcitx5 Lotus metadata rejects the wrong architecture" \
+    fcitx5_lotus_package_metadata "$safe_root/Fcitx5-Lotus-Packages-wrong-arch"
+sed 's/Package: fcitx5-lotus/Package: fcitx5-lotus-beta/' "$safe_root/Fcitx5-Lotus-Packages" \
+    >"$safe_root/Fcitx5-Lotus-Packages-wrong-name"
+expect_failure "Fcitx5 Lotus metadata rejects the wrong package name" \
+    fcitx5_lotus_package_metadata "$safe_root/Fcitx5-Lotus-Packages-wrong-name"
+sed 's/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/not-a-sha256/' \
+    "$safe_root/Fcitx5-Lotus-Packages" >"$safe_root/Fcitx5-Lotus-Packages-bad-sha"
+expect_failure "Fcitx5 Lotus metadata rejects an invalid package SHA-256" \
+    fcitx5_lotus_package_metadata "$safe_root/Fcitx5-Lotus-Packages-bad-sha"
+
 mkdir -p "$safe_root/onlyoffice-package/DEBIAN" "$safe_root/onlyoffice-package/usr/share/napos-test"
 cat >"$safe_root/onlyoffice-package/DEBIAN/control" <<'EOF'
 Package: onlyoffice-desktopeditors
@@ -315,6 +368,28 @@ expect_failure "ONLYOFFICE package validator rejects the wrong size" \
     validate_onlyoffice_deb "$safe_root/onlyoffice.deb" 9.4.0-129 \
     "$onlyoffice_fixture_sha" "$((onlyoffice_fixture_size + 1))"
 
+mkdir -p "$safe_root/lotus-package/DEBIAN" "$safe_root/lotus-package/usr/share/napos-test"
+cat >"$safe_root/lotus-package/DEBIAN/control" <<'EOF'
+Package: fcitx5-lotus
+Version: 3.4.0-1
+Architecture: amd64
+Maintainer: NapOS tests <noreply@example.invalid>
+Description: Fcitx5 Lotus validation fixture
+EOF
+printf 'fixture\n' >"$safe_root/lotus-package/usr/share/napos-test/payload"
+dpkg-deb --build "$safe_root/lotus-package" "$safe_root/lotus.deb" >/dev/null
+lotus_fixture_sha=$(sha256_of "$safe_root/lotus.deb")
+lotus_fixture_size=$(stat -c '%s' "$safe_root/lotus.deb")
+expect_success "Fcitx5 Lotus package validator accepts authenticated metadata" \
+    validate_fcitx5_lotus_deb "$safe_root/lotus.deb" 3.4.0-1 \
+    "$lotus_fixture_sha" "$lotus_fixture_size"
+expect_failure "Fcitx5 Lotus package validator rejects the wrong version" \
+    validate_fcitx5_lotus_deb "$safe_root/lotus.deb" 3.3.1-1 \
+    "$lotus_fixture_sha" "$lotus_fixture_size"
+expect_failure "Fcitx5 Lotus package validator rejects the wrong size" \
+    validate_fcitx5_lotus_deb "$safe_root/lotus.deb" 3.4.0-1 \
+    "$lotus_fixture_sha" "$((lotus_fixture_size + 1))"
+
 cat >"$safe_root/google-chrome.sources" <<EOF
 Types: deb
 URIs: $GOOGLE_CHROME_INSTALLED_APT_URI
@@ -330,12 +405,120 @@ sed 's#https://dl.google.com/#https://example.invalid/#' "$safe_root/google-chro
 expect_failure "Google Chrome APT source policy rejects another origin" \
     validate_chrome_apt_source "$safe_root/google-chrome-invalid.sources"
 
-expected_packages=$'curl\nflameshot\ngit\nhtop\nvim\nvlc'
+cat >"$safe_root/fcitx5-lotus.sources" <<EOF
+Types: deb
+URIs: $FCITX5_LOTUS_APT_ROOT/$UBUNTU_CODENAME
+Suites: $UBUNTU_CODENAME
+Components: main
+Architectures: $FCITX5_LOTUS_ARCH
+Signed-By: /usr/share/keyrings/fcitx5-lotus.gpg
+EOF
+expect_success "Fcitx5 Lotus APT source policy accepts the constrained source" \
+    validate_fcitx5_lotus_apt_source "$safe_root/fcitx5-lotus.sources"
+sed 's#https://fcitx5-lotus.pages.dev/#https://example.invalid/#' \
+    "$safe_root/fcitx5-lotus.sources" >"$safe_root/fcitx5-lotus-invalid.sources"
+expect_failure "Fcitx5 Lotus APT source policy rejects another origin" \
+    validate_fcitx5_lotus_apt_source "$safe_root/fcitx5-lotus-invalid.sources"
+cp "$safe_root/fcitx5-lotus.sources" "$safe_root/fcitx5-lotus-disabled.sources"
+printf 'Enabled: no\n' >>"$safe_root/fcitx5-lotus-disabled.sources"
+expect_failure "Fcitx5 Lotus APT source policy rejects extra options" \
+    validate_fcitx5_lotus_apt_source "$safe_root/fcitx5-lotus-disabled.sources"
+
+expected_packages=$'curl\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngit\nhtop\nvim\nvlc'
 actual_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$PROJECT_ROOT/config/packages.txt" | sort)
 if [[ "$actual_packages" == "$expected_packages" ]]; then
     pass "Desktop-essential package profile is exact"
 else
     fail "Desktop-essential package profile is exact"
+fi
+
+fcitx_profile="$PROJECT_ROOT/config/overlay/etc/skel/.config/fcitx5/profile"
+cat >"$safe_root/fcitx5-profile.expected" <<'EOF'
+[Groups/0]
+Name=Default
+Default Layout=us
+DefaultIM=lotus
+
+[Groups/0/Items/0]
+Name=keyboard-us
+Layout=
+
+[Groups/0/Items/1]
+Name=lotus
+Layout=
+
+[GroupOrder]
+0=Default
+EOF
+if cmp -s "$fcitx_profile" "$safe_root/fcitx5-profile.expected" &&
+    grep -qx 'ActiveByDefault=False' \
+        "$PROJECT_ROOT/config/overlay/etc/skel/.config/fcitx5/config" &&
+    [[ ! -e "$PROJECT_ROOT/config/overlay/etc/skel/.config/fcitx5/conf/lotus.conf" ]]; then
+    pass "Fcitx5 defaults enable Lotus behind the standard Ctrl+Space activation"
+else
+    fail "Fcitx5 defaults enable Lotus behind the standard Ctrl+Space activation"
+fi
+
+lotus_user_helper="$PROJECT_ROOT/config/overlay/usr/libexec/napos-fcitx5-lotus-user"
+expect_failure "Lotus user resolver rejects root" bash "$lotus_user_helper" --check root
+expect_failure "Lotus user resolver rejects unknown users" \
+    bash "$lotus_user_helper" --check napos-user-does-not-exist
+mkdir -p "$safe_root/lotus-helper-bin"
+cat >"$safe_root/lotus-helper-bin/getent" <<'EOF'
+#!/bin/sh
+case "$*" in
+    'passwd 4242') printf '%s\n' 'live:x:4242:4242:Live user:/home/live:/bin/bash' ;;
+    'passwd 120') printf '%s\n' 'lightdm:x:120:120:Display manager:/var/lib/lightdm:/bin/false' ;;
+    *) exit 2 ;;
+esac
+EOF
+chmod 0755 "$safe_root/lotus-helper-bin/getent"
+expect_success "Lotus user resolver accepts an interactive home user by UID" \
+    env PATH="$safe_root/lotus-helper-bin:/usr/bin:/bin" bash "$lotus_user_helper" --check 4242
+expect_failure "Lotus user resolver rejects a display-manager account" \
+    env PATH="$safe_root/lotus-helper-bin:/usr/bin:/bin" bash "$lotus_user_helper" --check 120
+
+lotus_user_unit="$PROJECT_ROOT/config/overlay/etc/systemd/system/user@.service.d/50-napos-fcitx5-lotus.conf"
+lotus_server_unit="$PROJECT_ROOT/config/overlay/etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf"
+if grep -Fqx 'Wants=fcitx5-lotus-server@%i.service' "$lotus_user_unit" &&
+    grep -Fqx 'PartOf=user@%i.service' "$lotus_server_unit" &&
+    grep -Fqx 'ExecCondition=/usr/libexec/napos-fcitx5-lotus-user --check %i' "$lotus_server_unit" &&
+    grep -Fqx 'ExecStart=/usr/libexec/napos-fcitx5-lotus-user --exec %i' "$lotus_server_unit"; then
+    pass "Lotus server follows each eligible systemd user lifecycle"
+else
+    fail "Lotus server follows each eligible systemd user lifecycle"
+fi
+
+lotus_hook="$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"
+if grep -Fq 'XMODIFIERS=@im=fcitx' "$lotus_hook" &&
+    grep -Fq 'GTK_IM_MODULE=fcitx' "$lotus_hook" &&
+    grep -Fq 'QT_IM_MODULE=fcitx' "$lotus_hook" &&
+    grep -Fq 'SDL_IM_MODULE=fcitx' "$lotus_hook" &&
+    grep -Fq 'GLFW_IM_MODULE=ibus' "$lotus_hook" &&
+    grep -Fq '/etc/xdg/autostart/org.fcitx.Fcitx5.desktop' "$lotus_hook"; then
+    pass "Desktop sessions inherit Fcitx5 variables and global autostart"
+else
+    fail "Desktop sessions inherit Fcitx5 variables and global autostart"
+fi
+
+install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+if grep -Fq '/usr/bin/env LOGNAME=root PATH=/tmp/napos-maintscript-bin:' <<<"$install_function" &&
+    grep -Fq 'for command in modprobe udevadm systemctl killall' <<<"$install_function" &&
+    grep -Fq '/tmp/napos-fcitx5-lotus.deb' <<<"$install_function" &&
+    grep -Fq 'systemd-sysusers' <<<"$install_function"; then
+    pass "Lotus package installation isolates maintainer-script host side effects"
+else
+    fail "Lotus package installation isolates maintainer-script host side effects"
+fi
+
+build_info_function=$(sed -n '/^write_build_info()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+verify_function=$(sed -n '/^cmd_verify()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+if grep -Fq "fcitx5_lotus:{package:\$lotus_package" <<<"$build_info_function" &&
+    grep -Fq '.source.fcitx5_lotus.version' <<<"$verify_function" &&
+    grep -Fq '.source.fcitx5_lotus.signing_fingerprint' <<<"$verify_function"; then
+    pass "Build provenance records and verifies authenticated Fcitx5 Lotus inputs"
+else
+    fail "Build provenance records and verifies authenticated Fcitx5 Lotus inputs"
 fi
 
 expected_remove_packages=$(cat <<'EOF'
