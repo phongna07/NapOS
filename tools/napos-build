@@ -1139,6 +1139,8 @@ validate_customized_rootfs() {
         [[ "$VARIANT_ID" == "napos" ]]
         [[ -f /etc/napos-release ]]
         [[ "$(cat /etc/timezone)" == "$DEFAULT_TIMEZONE" ]]
+        [[ "$(printf "GET ubiquity/use_nonfree\n" |
+            debconf-communicate -fnoninteractive ubiquity)" == "0 true" ]]
         grep -qx "LANG=en_US.UTF-8" /etc/default/locale
         [[ -f /usr/share/backgrounds/napos/napos-wallpaper.svg ]]
         [[ -f /usr/share/icons/hicolor/scalable/apps/napos-logo.svg ]]

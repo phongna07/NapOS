@@ -755,6 +755,14 @@ else
     fail "Microsoft core fonts EULA is preseeded before repository package installation"
 fi
 
+branding_hook=$(<"$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")
+if grep -Fq 'ubiquity ubiquity/use_nonfree boolean true' <<<"$branding_hook" &&
+    grep -Fq 'debconf-set-selections' <<<"$branding_hook"; then
+    pass "Live installer enables multimedia codecs by default"
+else
+    fail "Live installer enables multimedia codecs by default"
+fi
+
 if grep -Fq 'napos-packages-remove.txt' <<<"$install_function" &&
     grep -Fq 'apt-get purge -y --' <<<"$install_function"; then
     pass "Build consumes the package removal profile with APT purge"

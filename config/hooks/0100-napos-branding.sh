@@ -16,6 +16,10 @@ done
     exit 1
 }
 
+printf '[NapOS] Configuring installer defaults...\n'
+printf '%s\n' 'ubiquity ubiquity/use_nonfree boolean true' |
+    debconf-set-selections
+
 printf '[NapOS] Configuring locale and timezone...\n'
 if grep -q '^# en_US.UTF-8 UTF-8' /etc/locale.gen; then
     sed -i 's/^# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen

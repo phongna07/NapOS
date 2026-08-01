@@ -17,6 +17,6 @@
 - [x] mouse pointer "Yaru"
 - [x] dark theme
 - [ ] fastfetch
-- [ ] set "Intall multimedia codecs" as the default
+- [x] set "Install multimedia codecs" as the default
 - [ ] Change GRUB boot name (currently Linux Mint)
 - [ ] OTA update
