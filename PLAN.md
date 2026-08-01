@@ -9,8 +9,6 @@
 - [x] fcitx5-lotus
 - [x] ttf-mscorefonts-installer
 - [x] OnlyOffice
-- [ ] unrar, p7zip-full
-- [ ] Zalo appimage
 - [x] config vlc media player as the default
 - [x] clipboard history
 - [ ] add desktop icons and taskbar icons
