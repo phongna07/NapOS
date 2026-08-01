@@ -1,4 +1,5 @@
 # Packages from the Linux Mint / Ubuntu repositories.
+copyq
 curl
 fcitx5
 fcitx5-config-qt

@@ -447,7 +447,7 @@ expect_failure "Installed package conffile rejects modified content" \
 expect_failure "Installed package conffile rejects the wrong owning package" \
     verify_installed_conffile "$conffile_root" unexpected-package "$conffile_path"
 
-expected_packages=$'curl\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngit\nhtop\nttf-mscorefonts-installer\nvim\nvlc'
+expected_packages=$'copyq\ncurl\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngit\nhtop\nttf-mscorefonts-installer\nvim\nvlc'
 actual_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$PROJECT_ROOT/config/packages.txt" | sort)
 if [[ "$actual_packages" == "$expected_packages" ]]; then
     pass "Desktop-essential package profile is exact"
@@ -512,13 +512,22 @@ else
     fail "Lotus server follows each eligible systemd user lifecycle"
 fi
 
-lotus_hook="$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"
-if grep -Fq 'XMODIFIERS=@im=fcitx' "$lotus_hook" &&
-    grep -Fq 'GTK_IM_MODULE=fcitx' "$lotus_hook" &&
-    grep -Fq 'QT_IM_MODULE=fcitx' "$lotus_hook" &&
-    grep -Fq 'SDL_IM_MODULE=fcitx' "$lotus_hook" &&
-    grep -Fq 'GLFW_IM_MODULE=ibus' "$lotus_hook" &&
-    grep -Fq '/etc/xdg/autostart/org.fcitx.Fcitx5.desktop' "$lotus_hook"; then
+branding_hook="$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"
+if grep -Fq 'copyq_desktop=/usr/share/applications/com.github.hluk.copyq.desktop' \
+    "$branding_hook" &&
+    grep -Fq '/etc/xdg/autostart/com.github.hluk.copyq.desktop' "$branding_hook" &&
+    grep -Fq "sed -i 's|^Exec=.*|Exec=copyq|'" "$branding_hook"; then
+    pass "CopyQ starts hidden for every desktop login"
+else
+    fail "CopyQ starts hidden for every desktop login"
+fi
+
+if grep -Fq 'XMODIFIERS=@im=fcitx' "$branding_hook" &&
+    grep -Fq 'GTK_IM_MODULE=fcitx' "$branding_hook" &&
+    grep -Fq 'QT_IM_MODULE=fcitx' "$branding_hook" &&
+    grep -Fq 'SDL_IM_MODULE=fcitx' "$branding_hook" &&
+    grep -Fq 'GLFW_IM_MODULE=ibus' "$branding_hook" &&
+    grep -Fq '/etc/xdg/autostart/org.fcitx.Fcitx5.desktop' "$branding_hook"; then
     pass "Desktop sessions inherit Fcitx5 variables and global autostart"
 else
     fail "Desktop sessions inherit Fcitx5 variables and global autostart"
@@ -737,6 +746,8 @@ fi
 
 eval "$(sed -n '/^validate_cinnamon_panel_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
+eval "$(sed -n '/^validate_cinnamon_copyq_defaults()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")"
 dconf_defaults=$(awk '
     index($0, "cat >/etc/dconf/db/local.d/00-napos") { active=1; next }
     active && $0 == "EOF" { exit }
@@ -753,6 +764,11 @@ expect_failure "Cinnamon defaults reject the original left-side applet positions
 incomplete_panel_defaults=${dconf_defaults/panel1:right:8:sound@cinnamon.org/panel1:right:8:missing@cinnamon.org}
 expect_failure "Cinnamon defaults require every preserved Mint status applet" \
     validate_cinnamon_panel_defaults "$incomplete_panel_defaults"
+expect_success "Cinnamon defaults bind Super+V to the CopyQ history toggle" \
+    validate_cinnamon_copyq_defaults "$dconf_defaults"
+invalid_copyq_defaults=${dconf_defaults//<Super>v/<Super>x}
+expect_failure "Cinnamon CopyQ defaults reject an incorrect shortcut" \
+    validate_cinnamon_copyq_defaults "$invalid_copyq_defaults"
 
 if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then
     fail 'Incorrect product spelling "Napos" exists in configuration or assets'

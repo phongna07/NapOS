@@ -73,6 +73,8 @@ Verification requires:
 - NapOS logo and wallpaper.
 - Cinnamon menu and grouped application list centered by the system dconf
   defaults, with the remaining Mint panel applets preserved.
+- CopyQ installed with a system-wide hidden autostart entry and a user-overridable
+  Cinnamon `Super+V` shortcut that runs `copyq toggle`.
 - Installer label `Install NapOS`.
 - All selected desktop packages in `filesystem.manifest`.
 - The `ttf-mscorefonts-installer` package plus its Arial and Times New Roman

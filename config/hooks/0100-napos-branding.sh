@@ -69,6 +69,14 @@ cat >/etc/dconf/db/local.d/00-napos <<'EOF'
 [org/cinnamon]
 enabled-applets=['panel1:center:0:menu@cinnamon.org', 'panel1:left:1:separator@cinnamon.org', 'panel1:center:1:grouped-window-list@cinnamon.org', 'panel1:right:0:systray@cinnamon.org', 'panel1:right:1:xapp-status@cinnamon.org', 'panel1:right:2:notifications@cinnamon.org', 'panel1:right:3:printers@cinnamon.org', 'panel1:right:4:removable-drives@cinnamon.org', 'panel1:right:5:keyboard@cinnamon.org', 'panel1:right:6:favorites@cinnamon.org', 'panel1:right:7:network@cinnamon.org', 'panel1:right:8:sound@cinnamon.org', 'panel1:right:9:power@cinnamon.org', 'panel1:right:10:calendar@cinnamon.org', 'panel1:right:11:cornerbar@cinnamon.org']
 
+[org/cinnamon/desktop/keybindings]
+custom-list=['custom0']
+
+[org/cinnamon/desktop/keybindings/custom-keybindings/custom0]
+name='CopyQ Clipboard History'
+binding=['<Super>v']
+command='copyq toggle'
+
 [org/cinnamon/desktop/background]
 picture-uri='file:///usr/share/backgrounds/napos/napos-wallpaper.svg'
 picture-options='zoom'
@@ -78,6 +86,21 @@ picture-uri='file:///usr/share/backgrounds/napos/napos-wallpaper.svg'
 picture-options='zoom'
 EOF
 dconf update
+
+printf '[NapOS] Configuring CopyQ clipboard history...\n'
+copyq_desktop=/usr/share/applications/com.github.hluk.copyq.desktop
+[[ -f "$copyq_desktop" ]] || {
+    printf 'Required CopyQ desktop launcher is missing: %s\n' "$copyq_desktop" >&2
+    exit 1
+}
+mkdir -p /etc/xdg/autostart
+cp "$copyq_desktop" /etc/xdg/autostart/com.github.hluk.copyq.desktop
+sed -i 's|^Exec=.*|Exec=copyq|' /etc/xdg/autostart/com.github.hluk.copyq.desktop
+grep -qx 'Exec=copyq' /etc/xdg/autostart/com.github.hluk.copyq.desktop || {
+    printf 'Failed to configure hidden CopyQ autostart.\n' >&2
+    exit 1
+}
+chmod 0644 /etc/xdg/autostart/com.github.hluk.copyq.desktop
 
 printf '[NapOS] Configuring Fcitx5 Lotus defaults...\n'
 chmod 0755 /usr/libexec/napos-fcitx5-lotus-user

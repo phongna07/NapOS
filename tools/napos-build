@@ -158,6 +158,26 @@ validate_cinnamon_panel_defaults() {
     [[ "$(awk -F'@cinnamon.org' '{ print NF - 1 }' <<<"$enabled_applets")" == "${#expected_applets[@]}" ]]
 }
 
+validate_cinnamon_copyq_defaults() {
+    local dconf_data=$1
+    awk '
+        $0 == "[org/cinnamon/desktop/keybindings]" {
+            section="keybindings"
+            next
+        }
+        $0 == "[org/cinnamon/desktop/keybindings/custom-keybindings/custom0]" {
+            section="copyq"
+            next
+        }
+        /^\[/ { section="" }
+        section == "keybindings" && $0 == "custom-list=[\x27custom0\x27]" { custom_list=1 }
+        section == "copyq" && $0 == "name=\x27CopyQ Clipboard History\x27" { name=1 }
+        section == "copyq" && $0 == "binding=[\x27<Super>v\x27]" { binding=1 }
+        section == "copyq" && $0 == "command=\x27copyq toggle\x27" { command=1 }
+        END { exit !(custom_list && name && binding && command) }
+    ' <<<"$dconf_data"
+}
+
 check_wsl2() {
     grep -qi 'microsoft-standard-WSL2' /proc/sys/kernel/osrelease
 }
@@ -937,7 +957,7 @@ validate_customized_rootfs() {
         ubuntu-pro-client:/etc/apt/preferences.d/ubuntu-pro-esm-infra
     )
     local packages=(
-        vlc flameshot git curl htop vim ttf-mscorefonts-installer
+        vlc flameshot git copyq curl htop vim ttf-mscorefonts-installer
         fcitx5 fcitx5-config-qt fcitx5-frontend-all
     )
     local remove_packages=()
@@ -967,6 +987,10 @@ validate_customized_rootfs() {
         [[ -x /usr/bin/google-chrome-stable ]]
         [[ -f /usr/share/applications/google-chrome.desktop ]]
         [[ -f /usr/share/applications/vlc.desktop ]]
+        [[ -x /usr/bin/copyq ]]
+        [[ -f /usr/share/applications/com.github.hluk.copyq.desktop ]]
+        [[ -f /etc/xdg/autostart/com.github.hluk.copyq.desktop ]]
+        grep -qx "Exec=copyq" /etc/xdg/autostart/com.github.hluk.copyq.desktop
         [[ -x /usr/bin/onlyoffice-desktopeditors ]]
         [[ -f /usr/share/applications/onlyoffice-desktopeditors.desktop ]]
         for font in \
@@ -1082,6 +1106,8 @@ validate_customized_rootfs() {
     dconf_data=$(sudo cat "$ROOTFS/etc/dconf/db/local.d/00-napos")
     validate_cinnamon_panel_defaults "$dconf_data" ||
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
+    validate_cinnamon_copyq_defaults "$dconf_data" ||
+        die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
     base_reference=$(base_reference_root)
     sudo cmp -s "$ROOTFS/etc/lsb-release" "$base_reference/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
@@ -1372,7 +1398,8 @@ cmd_verify() {
     local onlyoffice_version onlyoffice_launcher office_mime
     local lotus_source_file lotus_key_file lotus_key_fingerprint lotus_version
     local fcitx_environment fcitx_profile fcitx_config lotus_user_unit lotus_server_unit
-    local mimeapps mint_mimeapps grouped_window_list panel_launchers application_defaults launcher_defaults
+    local copyq_autostart mimeapps mint_mimeapps grouped_window_list panel_launchers
+    local application_defaults launcher_defaults
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
     sidecar="${iso}.sha256"
@@ -1445,6 +1472,15 @@ cmd_verify() {
         die "Google Chrome desktop launcher is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/vlc.desktop >/dev/null 2>&1 ||
         die "VLC desktop launcher is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/copyq 2>/dev/null |
+        grep -q 'usr/bin/copyq' || die "CopyQ executable is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/com.github.hluk.copyq.desktop \
+        >/dev/null 2>&1 || die "CopyQ desktop launcher is missing."
+    copyq_autostart=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        etc/xdg/autostart/com.github.hluk.copyq.desktop 2>/dev/null) ||
+        die "CopyQ global autostart entry is missing."
+    grep -qx 'Exec=copyq' <<<"$copyq_autostart" ||
+        die "CopyQ autostart does not start hidden."
     onlyoffice_launcher=$(unsquashfs -cat "$temp/filesystem.squashfs" \
         usr/share/applications/onlyoffice-desktopeditors.desktop 2>/dev/null) ||
         die "ONLYOFFICE desktop launcher is missing."
@@ -1619,6 +1655,8 @@ cmd_verify() {
     grep -q 'napos-wallpaper.svg' <<<"$dconf_data" || die "NapOS wallpaper dconf default is missing."
     validate_cinnamon_panel_defaults "$dconf_data" ||
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
+    validate_cinnamon_copyq_defaults "$dconf_data" ||
+        die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
     grep -q '^Name=Install NapOS$' <<<"$installer" || die "Installer launcher is not branded Install NapOS."
     grep -q '^Name\[vi\]=Cài đặt NapOS$' <<<"$installer" || die "Vietnamese installer label is not branded Cài đặt NapOS."
     grep -q '^Icon=napos-logo$' <<<"$installer" || die "Installer launcher icon is not NapOS."
@@ -1631,7 +1669,7 @@ cmd_verify() {
         usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf >/dev/null 2>&1 ||
         die "Microsoft Times New Roman font payload is missing."
 
-    for package in vlc flameshot git curl htop vim ibus ttf-mscorefonts-installer \
+    for package in vlc flameshot git copyq curl htop vim ibus ttf-mscorefonts-installer \
         fcitx5 fcitx5-config-qt fcitx5-frontend-all \
         "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
         grep -Eq "^${package} " "$temp/filesystem.manifest" || die "Package is absent from filesystem.manifest: $package"
@@ -1752,7 +1790,7 @@ cmd_inspect() {
     printf '\nNapOS release:\n'
     unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
     printf '\nSelected packages:\n'
-    for package in vlc flameshot git curl htop vim ttf-mscorefonts-installer \
+    for package in vlc flameshot git copyq curl htop vim ttf-mscorefonts-installer \
         fcitx5 fcitx5-config-qt fcitx5-frontend-all \
         "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
         awk -v wanted="$package" '$1 == wanted {print; found=1} END {if (!found) print wanted " (missing)"}' \

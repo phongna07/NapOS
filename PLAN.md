@@ -12,10 +12,9 @@
 - [ ] unrar, p7zip-full
 - [ ] Zalo appimage
 - [x] config vlc media player as the default
-- [ ] clipboard history
+- [x] clipboard history
 - [ ] add desktop icons and taskbar icons
 - [x] center the taskbar
-- [ ] add some kind of system monitor to the left of the taskbar
 - [ ] edit the minimize, maximize, close buttons for each windows (Windows-10-Dark set the Applications option in Themes)
 - [ ] mouse pointer "Yaru"
 - [ ] dark theme
