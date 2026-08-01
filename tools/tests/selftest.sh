@@ -440,6 +440,25 @@ else
     fail "ONLYOFFICE policy includes Microsoft templates, macros, slideshows, RTF, and CSV"
 fi
 
+eval "$(sed -n '/^validate_cinnamon_panel_defaults()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")"
+dconf_defaults=$(awk '
+    index($0, "cat >/etc/dconf/db/local.d/00-napos") { active=1; next }
+    active && $0 == "EOF" { exit }
+    active { print }
+' "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")
+expect_success "Cinnamon defaults center the menu and grouped application list" \
+    validate_cinnamon_panel_defaults "$dconf_defaults"
+left_panel_defaults=$(sed \
+    -e 's/panel1:center:0:menu@cinnamon.org/panel1:left:0:menu@cinnamon.org/' \
+    -e 's/panel1:center:1:grouped-window-list@cinnamon.org/panel1:left:2:grouped-window-list@cinnamon.org/' \
+    <<<"$dconf_defaults")
+expect_failure "Cinnamon defaults reject the original left-side applet positions" \
+    validate_cinnamon_panel_defaults "$left_panel_defaults"
+incomplete_panel_defaults=${dconf_defaults/panel1:right:8:sound@cinnamon.org/panel1:right:8:missing@cinnamon.org}
+expect_failure "Cinnamon defaults require every preserved Mint status applet" \
+    validate_cinnamon_panel_defaults "$incomplete_panel_defaults"
+
 if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then
     fail 'Incorrect product spelling "Napos" exists in configuration or assets'
 else

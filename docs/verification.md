@@ -67,6 +67,8 @@ Verification requires:
 - Preserved Mint and Ubuntu technical codenames.
 - English locale and Bangkok timezone.
 - NapOS logo and wallpaper.
+- Cinnamon menu and grouped application list centered by the system dconf
+  defaults, with the remaining Mint panel applets preserved.
 - Installer label `Install NapOS`.
 - All selected desktop packages in `filesystem.manifest`.
 - No Firefox, Firefox locale, Mint Chat, Celluloid, or LibreOffice package in

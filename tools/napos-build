@@ -114,6 +114,44 @@ doctor_check() {
 
 doctor_failure() { doctor_check "$1" false; }
 
+validate_cinnamon_panel_defaults() {
+    local dconf_data=$1
+    local enabled_applets applet
+    local expected_applets=(
+        panel1:center:0:menu@cinnamon.org
+        panel1:left:1:separator@cinnamon.org
+        panel1:center:1:grouped-window-list@cinnamon.org
+        panel1:right:0:systray@cinnamon.org
+        panel1:right:1:xapp-status@cinnamon.org
+        panel1:right:2:notifications@cinnamon.org
+        panel1:right:3:printers@cinnamon.org
+        panel1:right:4:removable-drives@cinnamon.org
+        panel1:right:5:keyboard@cinnamon.org
+        panel1:right:6:favorites@cinnamon.org
+        panel1:right:7:network@cinnamon.org
+        panel1:right:8:sound@cinnamon.org
+        panel1:right:9:power@cinnamon.org
+        panel1:right:10:calendar@cinnamon.org
+        panel1:right:11:cornerbar@cinnamon.org
+    )
+    enabled_applets=$(awk '
+        $0 == "[org/cinnamon]" { active=1; next }
+        /^\[/ { active=0 }
+        active && /^enabled-applets=/ {
+            sub(/^enabled-applets=/, "")
+            print
+            exit
+        }
+    ' <<<"$dconf_data")
+    [[ -n "$enabled_applets" ]] || return 1
+    for applet in "${expected_applets[@]}"; do
+        [[ "$enabled_applets" == *"'$applet'"* ]] || return 1
+    done
+    [[ "$enabled_applets" != *"'panel1:left:0:menu@cinnamon.org'"* ]] || return 1
+    [[ "$enabled_applets" != *"'panel1:left:2:grouped-window-list@cinnamon.org'"* ]] || return 1
+    [[ "$(awk -F'@cinnamon.org' '{ print NF - 1 }' <<<"$enabled_applets")" == "${#expected_applets[@]}" ]]
+}
+
 check_wsl2() {
     grep -qi 'microsoft-standard-WSL2' /proc/sys/kernel/osrelease
 }
@@ -681,7 +719,7 @@ install_packages_and_hooks() {
 }
 
 validate_customized_rootfs() {
-    local package chrome_key_fingerprint chrome_source
+    local package chrome_key_fingerprint chrome_source dconf_data
     local packages=(vlc flameshot git curl htop vim)
     local remove_packages=()
     mapfile -t remove_packages < <(
@@ -771,6 +809,9 @@ validate_customized_rootfs() {
         grep -Rqs "Name\[vi\]=Cài đặt NapOS" /usr/share/applications
         grep -Rqs "Icon=napos-logo" /usr/share/applications
     '
+    dconf_data=$(sudo cat "$ROOTFS/etc/dconf/db/local.d/00-napos")
+    validate_cinnamon_panel_defaults "$dconf_data" ||
+        die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     sudo cmp -s "$ROOTFS/etc/lsb-release" "$BASE_CACHE_DIR/rootfs/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
     sudo diff -qr --exclude=google-chrome.sources \
@@ -1167,6 +1208,8 @@ cmd_verify() {
     [[ "$timezone" == "$DEFAULT_TIMEZONE" ]] || die "Unexpected timezone: $timezone"
     grep -qx 'LANG=en_US.UTF-8' <<<"$locale_data" || die "Default locale is not en_US.UTF-8."
     grep -q 'napos-wallpaper.svg' <<<"$dconf_data" || die "NapOS wallpaper dconf default is missing."
+    validate_cinnamon_panel_defaults "$dconf_data" ||
+        die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     grep -q '^Name=Install NapOS$' <<<"$installer" || die "Installer launcher is not branded Install NapOS."
     grep -q '^Name\[vi\]=Cài đặt NapOS$' <<<"$installer" || die "Vietnamese installer label is not branded Cài đặt NapOS."
     grep -q '^Icon=napos-logo$' <<<"$installer" || die "Installer launcher icon is not NapOS."

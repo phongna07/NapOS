@@ -21,15 +21,18 @@ cp ~/napos/dist/NapOS-0.1.0-dev-cinnamon-amd64.iso \
 ## Legacy BIOS test
 
 1. Leave EFI disabled and attach the development ISO.
-2. Boot the live desktop and confirm the NapOS wallpaper.
+2. Boot the live desktop and confirm the NapOS wallpaper. Confirm the Cinnamon
+   menu and grouped application list are centered on the panel.
 3. Open `Install NapOS` and install to the VDI.
 4. Shut down, eject the ISO, and boot the installed system.
 5. Confirm applications, Google Chrome as the default browser, no Firefox or
    Mint Chat launcher, DNS, `apt update`, English locale,
-   Bangkok timezone, reboot, and shutdown.
+   Bangkok timezone, and the centered menu and grouped application list.
 6. Open representative DOCX, XLSX, PPTX, DOCM, XLSB, PPSX, RTF, and CSV files
    from the file manager and confirm each launches in ONLYOFFICE. Confirm PDF,
    ODT, ODS, and ODP defaults were not reassigned to ONLYOFFICE.
+7. Rearrange one panel applet, log out and back in, and confirm the customized
+   layout persists instead of being reset to the NapOS default.
 
 ## UEFI test
 
@@ -39,7 +42,7 @@ Create a second disposable VM, or erase the first virtual disk:
 2. Repeat the live boot and installation.
 3. Eject the ISO and confirm the installed system boots through EFI.
 4. Run the same application, office-file association, package, locale, network,
-   reboot, and shutdown checks.
+   panel-layout, reboot, and shutdown checks.
 
 ## Release gate
 
