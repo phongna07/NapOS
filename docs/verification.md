@@ -65,7 +65,8 @@ Verification requires:
 - NapOS logo and wallpaper.
 - Installer label `Install NapOS`.
 - All selected desktop packages in `filesystem.manifest`.
-- No Firefox, Firefox locale, or Mint Chat package in `filesystem.manifest`.
+- No Firefox, Firefox locale, Mint Chat, Celluloid, or LibreOffice package in
+  `filesystem.manifest`.
 - The resolved `google-chrome-stable` version, executable, desktop launcher,
   official APT source, and signing key inside the live SquashFS.
 - Google Chrome assigned as the HTTP/HTML handler and present in Cinnamon's

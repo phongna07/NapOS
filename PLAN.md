@@ -3,8 +3,8 @@
 - [x] Change background
 - [ ] Change logo
 - [x] Remove firefox
-- [ ] Remove libreoffice
-- [ ] remove celluloid media player
+- [x] Remove libreoffice
+- [x] remove celluloid media player
 - [x] Chrome
 - [ ] fcitx5-lotus
 - [ ] OBS Studio

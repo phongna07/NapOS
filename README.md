@@ -65,9 +65,10 @@ under `dist/`.
 4. **Fresh work tree:** copies the immutable cache for every build so package
    changes never accumulate across builds.
 5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, Vim, and the
-   authenticated official Google Chrome `.deb`; purges Firefox, its language
-   packs, and Mint Chat; makes Chrome the default browser; and applies
-   English/Bangkok defaults and original NapOS artwork.
+   authenticated official Google Chrome `.deb`; purges Firefox and its language
+   packs, Mint Chat, Celluloid, and the complete LibreOffice suite; makes Chrome
+   the default browser; and applies English/Bangkok defaults and original NapOS
+   artwork.
 6. **Clean:** removes APT/build state, restores DNS, and verifies all chroot
    mounts are gone.
 7. **Pack:** creates LZ4 or XZ SquashFS and refreshes Casper size, package

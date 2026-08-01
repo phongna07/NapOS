@@ -198,7 +198,65 @@ else
     fail "Desktop-essential package profile is exact"
 fi
 
-expected_remove_packages=$'firefox\nfirefox-locale-de\nfirefox-locale-en\nfirefox-locale-es\nfirefox-locale-fr\nfirefox-locale-it\nfirefox-locale-nl\nfirefox-locale-pt\nfirefox-locale-ru\nmintchat'
+expected_remove_packages=$(cat <<'EOF'
+celluloid
+firefox
+firefox-locale-de
+firefox-locale-en
+firefox-locale-es
+firefox-locale-fr
+firefox-locale-it
+firefox-locale-nl
+firefox-locale-pt
+firefox-locale-ru
+fonts-opensymbol
+libreoffice-base-core
+libreoffice-calc
+libreoffice-common
+libreoffice-core
+libreoffice-draw
+libreoffice-gnome
+libreoffice-gtk3
+libreoffice-help-common
+libreoffice-help-de
+libreoffice-help-en-gb
+libreoffice-help-en-us
+libreoffice-help-es
+libreoffice-help-fr
+libreoffice-help-it
+libreoffice-help-nl
+libreoffice-help-pt
+libreoffice-help-pt-br
+libreoffice-help-ru
+libreoffice-impress
+libreoffice-l10n-de
+libreoffice-l10n-en-gb
+libreoffice-l10n-en-za
+libreoffice-l10n-es
+libreoffice-l10n-fr
+libreoffice-l10n-it
+libreoffice-l10n-nl
+libreoffice-l10n-pt
+libreoffice-l10n-pt-br
+libreoffice-l10n-ru
+libreoffice-style-colibre
+libreoffice-uiconfig-calc
+libreoffice-uiconfig-common
+libreoffice-uiconfig-draw
+libreoffice-uiconfig-impress
+libreoffice-uiconfig-writer
+libreoffice-writer
+libuno-cppu3t64
+libuno-cppuhelpergcc3-3t64
+libuno-purpenvhelpergcc3-3t64
+libuno-sal3t64
+libuno-salhelpergcc3-3t64
+mintchat
+python3-uno
+uno-libs-private
+ure
+EOF
+)
 actual_remove_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' \
     "$PROJECT_ROOT/config/packages-remove.txt" | sort)
 if [[ "$actual_remove_packages" == "$expected_remove_packages" ]]; then
