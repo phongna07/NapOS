@@ -76,7 +76,13 @@ picture-options='zoom'
 EOF
 dconf update
 
-printf '[NapOS] Configuring Google Chrome as the default browser...\n'
+printf '[NapOS] Configuring default applications...\n'
+celluloid_desktop=io.github.celluloid_player.Celluloid.desktop
+vlc_desktop=vlc.desktop
+[[ -f "/usr/share/applications/$vlc_desktop" ]] || {
+    printf 'Required VLC desktop launcher is missing: %s\n' "/usr/share/applications/$vlc_desktop" >&2
+    exit 1
+}
 mimeapps_files=(
     /usr/share/applications/mimeapps.list
     /usr/share/ubuntu-system-adjustments/mimeapps.list
@@ -86,7 +92,14 @@ for mimeapps_file in "${mimeapps_files[@]}"; do
         printf 'Required MIME application policy is missing: %s\n' "$mimeapps_file" >&2
         exit 1
     }
-    sed -i 's/=firefox\.desktop$/=google-chrome.desktop/' "$mimeapps_file"
+    sed -i \
+        -e 's/=firefox\.desktop$/=google-chrome.desktop/' \
+        -e 's/io\.github\.celluloid_player\.Celluloid\.desktop/vlc.desktop/g' \
+        "$mimeapps_file"
+    if grep -Fq "$celluloid_desktop" "$mimeapps_file"; then
+        printf 'Celluloid remains assigned in MIME application policy: %s\n' "$mimeapps_file" >&2
+        exit 1
+    fi
 done
 
 launcher_schemas=(

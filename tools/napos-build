@@ -602,6 +602,7 @@ validate_customized_rootfs() {
         [[ -s /etc/dconf/db/local ]]
         [[ -x /usr/bin/google-chrome-stable ]]
         [[ -f /usr/share/applications/google-chrome.desktop ]]
+        [[ -f /usr/share/applications/vlc.desktop ]]
         [[ ! -e /usr/bin/firefox ]]
         [[ ! -e /usr/share/applications/firefox.desktop ]]
         [[ ! -e /var/lib/flatpak/app/com.google.Chrome ]]
@@ -612,7 +613,14 @@ validate_customized_rootfs() {
             grep -qx "text/html=google-chrome.desktop" "$mimeapps"
             grep -qx "x-scheme-handler/http=google-chrome.desktop" "$mimeapps"
             grep -qx "x-scheme-handler/https=google-chrome.desktop" "$mimeapps"
+            grep -qx "audio/mpeg=vlc.desktop" "$mimeapps"
+            grep -qx "audio/ogg=vlc.desktop;org.gnome.Rhythmbox3.desktop" "$mimeapps"
+            grep -qx "audio/flac=org.gnome.Rhythmbox3.desktop" "$mimeapps"
+            grep -qx "video/mp4=vlc.desktop" "$mimeapps"
+            grep -qx "video/x-matroska=vlc.desktop" "$mimeapps"
+            grep -qx "x-content/video-dvd=vlc.desktop" "$mimeapps"
             ! grep -q "=firefox.desktop$" "$mimeapps"
+            ! grep -Fq "io.github.celluloid_player.Celluloid.desktop" "$mimeapps"
         done
         for launcher_schema in \
             /usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json \
@@ -826,7 +834,7 @@ cmd_verify() {
     local package napos_release os_release timezone installer locale_data dconf_data
     local squashfs_report compression expected_compression base_iso
     local build_info chrome_source_file chrome_key_file chrome_key_fingerprint chrome_version
-    local mimeapps mint_mimeapps grouped_window_list panel_launchers browser_defaults launcher_defaults
+    local mimeapps mint_mimeapps grouped_window_list panel_launchers application_defaults launcher_defaults
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
     sidecar="${iso}.sha256"
@@ -886,6 +894,8 @@ cmd_verify() {
         die "Google Chrome APT keyring fingerprint mismatch: $chrome_key_fingerprint"
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/google-chrome.desktop >/dev/null 2>&1 ||
         die "Google Chrome desktop launcher is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/vlc.desktop >/dev/null 2>&1 ||
+        die "VLC desktop launcher is missing."
     unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/google-chrome-stable 2>/dev/null |
         grep -q 'usr/bin/google-chrome-stable' || die "Google Chrome executable is missing."
     if unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/firefox.desktop \
@@ -907,17 +917,32 @@ cmd_verify() {
     panel_launchers=$(unsquashfs -cat "$temp/filesystem.squashfs" \
         usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json 2>/dev/null) ||
         die "Cinnamon panel-launcher defaults are missing."
-    for browser_defaults in "$mimeapps" "$mint_mimeapps"; do
-        grep -qx 'application/xhtml+xml=google-chrome.desktop' <<<"$browser_defaults" ||
+    for application_defaults in "$mimeapps" "$mint_mimeapps"; do
+        grep -qx 'application/xhtml+xml=google-chrome.desktop' <<<"$application_defaults" ||
             die "Google Chrome is not the default XHTML handler."
-        grep -qx 'text/html=google-chrome.desktop' <<<"$browser_defaults" ||
+        grep -qx 'text/html=google-chrome.desktop' <<<"$application_defaults" ||
             die "Google Chrome is not the default HTML handler."
-        grep -qx 'x-scheme-handler/http=google-chrome.desktop' <<<"$browser_defaults" ||
+        grep -qx 'x-scheme-handler/http=google-chrome.desktop' <<<"$application_defaults" ||
             die "Google Chrome is not the default HTTP handler."
-        grep -qx 'x-scheme-handler/https=google-chrome.desktop' <<<"$browser_defaults" ||
+        grep -qx 'x-scheme-handler/https=google-chrome.desktop' <<<"$application_defaults" ||
             die "Google Chrome is not the default HTTPS handler."
-        if grep -q '=firefox.desktop$' <<<"$browser_defaults"; then
+        grep -qx 'audio/mpeg=vlc.desktop' <<<"$application_defaults" ||
+            die "VLC is not the default MPEG audio handler."
+        grep -qx 'audio/ogg=vlc.desktop;org.gnome.Rhythmbox3.desktop' <<<"$application_defaults" ||
+            die "VLC is not the primary Ogg audio handler."
+        grep -qx 'audio/flac=org.gnome.Rhythmbox3.desktop' <<<"$application_defaults" ||
+            die "The Rhythmbox-only FLAC default was not preserved."
+        grep -qx 'video/mp4=vlc.desktop' <<<"$application_defaults" ||
+            die "VLC is not the default MP4 video handler."
+        grep -qx 'video/x-matroska=vlc.desktop' <<<"$application_defaults" ||
+            die "VLC is not the default Matroska video handler."
+        grep -qx 'x-content/video-dvd=vlc.desktop' <<<"$application_defaults" ||
+            die "VLC is not the default video DVD handler."
+        if grep -q '=firefox.desktop$' <<<"$application_defaults"; then
             die "Firefox remains assigned as a MIME handler."
+        fi
+        if grep -Fq 'io.github.celluloid_player.Celluloid.desktop' <<<"$application_defaults"; then
+            die "Celluloid remains assigned as a MIME handler."
         fi
     done
     for launcher_defaults in "$grouped_window_list" "$panel_launchers"; do

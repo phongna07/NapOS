@@ -295,6 +295,28 @@ else
     fail "Desktop customization replaces Firefox defaults with Google Chrome"
 fi
 
+mimeapps_fixture="$safe_root/mimeapps.list"
+cat >"$mimeapps_fixture" <<'EOF'
+[Default Applications]
+video/mp4=io.github.celluloid_player.Celluloid.desktop
+audio/ogg=io.github.celluloid_player.Celluloid.desktop;org.gnome.Rhythmbox3.desktop
+audio/flac=org.gnome.Rhythmbox3.desktop
+EOF
+sed 's/io\.github\.celluloid_player\.Celluloid\.desktop/vlc.desktop/g' "$mimeapps_fixture" \
+    >"$safe_root/mimeapps.expected"
+if grep -Fq 's/io\.github\.celluloid_player\.Celluloid\.desktop/vlc.desktop/g' \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+    grep -Fq "grep -Fq \"\$celluloid_desktop\" \"\$mimeapps_file\"" \
+        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+    grep -qx 'video/mp4=vlc.desktop' "$safe_root/mimeapps.expected" &&
+    grep -qx 'audio/ogg=vlc.desktop;org.gnome.Rhythmbox3.desktop' "$safe_root/mimeapps.expected" &&
+    grep -qx 'audio/flac=org.gnome.Rhythmbox3.desktop' "$safe_root/mimeapps.expected" &&
+    ! grep -Fq 'io.github.celluloid_player.Celluloid.desktop' "$safe_root/mimeapps.expected"; then
+    pass "Desktop customization replaces Celluloid defaults with VLC"
+else
+    fail "Desktop customization replaces Celluloid defaults with VLC"
+fi
+
 if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then
     fail 'Incorrect product spelling "Napos" exists in configuration or assets'
 else

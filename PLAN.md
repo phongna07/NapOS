@@ -11,7 +11,7 @@
 - [ ] OnlyOffice
 - [ ] Zalo appimage
 - [ ] zsh shell
-- [ ] config vlc media player as the default
+- [x] config vlc media player as the default
 - [ ] clipboard history
 - [ ] add desktop icons and taskbar icons
 - [ ] center the taskbar
