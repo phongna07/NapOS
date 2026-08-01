@@ -16,6 +16,7 @@ DOWNLOAD_DIR="$CACHE_DIR/downloads/$BASE_ISO_SHA256"
 CHROME_DOWNLOAD_DIR="$CACHE_DIR/downloads/google-chrome"
 ONLYOFFICE_DOWNLOAD_DIR="$CACHE_DIR/downloads/onlyoffice"
 FCITX5_LOTUS_DOWNLOAD_DIR="$CACHE_DIR/downloads/fcitx5-lotus"
+WINDOWS_10_DARK_THEME_DOWNLOAD_DIR="$CACHE_DIR/downloads/windows-10-dark-theme"
 BASE_CACHE_DIR="$CACHE_DIR/base/$BASE_ISO_SHA256"
 WORK_DIR="$PROJECT_ROOT/work"
 ISO_TREE="$WORK_DIR/iso-tree"
@@ -27,7 +28,9 @@ CONFIG_DIR="$PROJECT_ROOT/config"
 
 # These shared readonly values are consumed by scripts that source this library.
 # shellcheck disable=SC2034
-readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR CHROME_DOWNLOAD_DIR ONLYOFFICE_DOWNLOAD_DIR FCITX5_LOTUS_DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
+readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR CHROME_DOWNLOAD_DIR ONLYOFFICE_DOWNLOAD_DIR FCITX5_LOTUS_DOWNLOAD_DIR
+# shellcheck disable=SC2034
+readonly WINDOWS_10_DARK_THEME_DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
 # shellcheck disable=SC2034
 readonly ISO_TREE ROOTFS META_DIR BASE_REFERENCE_DIR DIST_DIR CONFIG_DIR
 
@@ -101,6 +104,21 @@ validate_config() {
         die "Unexpected Fcitx5 Lotus signing-key URL."
     [[ "$(trim_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT")" =~ ^[A-F0-9]{40}$ ]] ||
         die "Invalid Fcitx5 Lotus signing fingerprint."
+    [[ "$WINDOWS_10_DARK_THEME_UUID" == "Windows-10-Dark" ]] ||
+        die "Unexpected Windows 10 Dark theme UUID."
+    [[ "$WINDOWS_10_DARK_THEME_NAME" == "Windows-10-Dark" ]] ||
+        die "Unexpected Windows 10 Dark theme name."
+    [[ "$WINDOWS_10_DARK_THEME_URL" == \
+        "https://cinnamon-spices.linuxmint.com/files/themes/Windows-10-Dark.zip" ]] ||
+        die "Unexpected Windows 10 Dark theme download URL."
+    [[ "$WINDOWS_10_DARK_THEME_CATALOG_COMMIT" =~ ^[a-f0-9]{40}$ ]] ||
+        die "Invalid Windows 10 Dark theme catalog commit."
+    [[ "$WINDOWS_10_DARK_THEME_SIZE" =~ ^[0-9]+$ ]] ||
+        die "Invalid Windows 10 Dark theme archive size."
+    [[ "$WINDOWS_10_DARK_THEME_SHA256" =~ ^[a-f0-9]{64}$ ]] ||
+        die "Invalid Windows 10 Dark theme SHA-256."
+    [[ "$WINDOWS_10_DARK_THEME_LICENSE" == "GPL-3.0" ]] ||
+        die "Unexpected Windows 10 Dark theme license."
     [[ -f "$CONFIG_DIR/packages.txt" ]] || die "Missing package list: $CONFIG_DIR/packages.txt"
     [[ -f "$CONFIG_DIR/packages-remove.txt" ]] ||
         die "Missing package removal list: $CONFIG_DIR/packages-remove.txt"
@@ -390,7 +408,7 @@ git_dirty() {
 }
 
 build_id() {
-    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|${ONLYOFFICE_DEB_SHA256:-unresolved}|${FCITX5_LOTUS_DEB_SHA256:-unresolved}|$(git_revision)" |
+    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|${ONLYOFFICE_DEB_SHA256:-unresolved}|${FCITX5_LOTUS_DEB_SHA256:-unresolved}|$WINDOWS_10_DARK_THEME_SHA256|$(git_revision)" |
         sha256sum | cut -c1-16
 }
 

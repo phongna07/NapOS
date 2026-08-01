@@ -31,3 +31,13 @@ FCITX5_LOTUS_ARCH="amd64"
 FCITX5_LOTUS_APT_ROOT="https://fcitx5-lotus.pages.dev/apt"
 FCITX5_LOTUS_SIGNING_KEY_URL="https://fcitx5-lotus.pages.dev/pubkey.gpg"
 FCITX5_LOTUS_SIGNING_FINGERPRINT="321E097BA44B5A53DB8BA81D55991878A14D5828"
+
+# Authenticated Windows 10 Dark Cinnamon Spice input. The mutable official
+# download URL is constrained by the committed archive size and SHA-256.
+WINDOWS_10_DARK_THEME_UUID="Windows-10-Dark"
+WINDOWS_10_DARK_THEME_NAME="Windows-10-Dark"
+WINDOWS_10_DARK_THEME_URL="https://cinnamon-spices.linuxmint.com/files/themes/Windows-10-Dark.zip"
+WINDOWS_10_DARK_THEME_CATALOG_COMMIT="deb844046fcf260a85d94c865aa83fd50e5b052b"
+WINDOWS_10_DARK_THEME_SIZE="1165638"
+WINDOWS_10_DARK_THEME_SHA256="5154158e055c035728b90095ff93045b1ed030280d149571c8a765e333d44d35"
+WINDOWS_10_DARK_THEME_LICENSE="GPL-3.0"

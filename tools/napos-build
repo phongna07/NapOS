@@ -29,6 +29,7 @@ FCITX5_LOTUS_VERSION=""
 FCITX5_LOTUS_DEB_SHA256=""
 FCITX5_LOTUS_DEB_SIZE=""
 FCITX5_LOTUS_REPOSITORY_PACKAGE_PATH=""
+WINDOWS_10_DARK_THEME_ARCHIVE_PATH=""
 
 cleanup_temp_paths() {
     local path
@@ -84,7 +85,7 @@ Usage:
 
 Preferred interface:
   make doctor   Validate WSL2/GitHub Ubuntu, tools, storage, sudo, and mounts
-  make fetch    Authenticate and cache Linux Mint, Chrome, ONLYOFFICE, and Fcitx5 Lotus
+  make fetch    Authenticate and cache Linux Mint, applications, input method, and theme
   make dev      Build and verify an LZ4 development ISO
   make release  Build and verify an XZ release ISO
   make verify ISO=dist/NapOS-...iso
@@ -178,6 +179,64 @@ validate_cinnamon_copyq_defaults() {
     ' <<<"$dconf_data"
 }
 
+validate_cinnamon_application_theme_defaults() {
+    local dconf_data=$1
+    awk '
+        $0 == "[org/cinnamon/desktop/interface]" {
+            section="interface"
+            next
+        }
+        $0 == "[org/cinnamon/theme]" {
+            section="desktop-theme"
+            next
+        }
+        $0 == "[org/cinnamon/desktop/wm/preferences]" {
+            section="window-manager"
+            next
+        }
+        /^\[/ { section="" }
+        section == "interface" && $0 == "gtk-theme=\x27Windows-10-Dark\x27" {
+            application_theme++
+            next
+        }
+        section == "interface" && /^(gtk-theme|icon-theme|cursor-theme)=/ { forbidden=1 }
+        section == "desktop-theme" && /^name=/ { forbidden=1 }
+        section == "window-manager" && /^theme=/ { forbidden=1 }
+        END { exit !(application_theme == 1 && !forbidden) }
+    ' <<<"$dconf_data"
+}
+
+validate_windows_10_dark_theme_archive() {
+    local archive=$1
+    local listing entry index_theme
+    local required_files=(
+        "$WINDOWS_10_DARK_THEME_UUID/LICENSE.md"
+        "$WINDOWS_10_DARK_THEME_UUID/index.theme"
+        "$WINDOWS_10_DARK_THEME_UUID/gtk-2.0/gtkrc"
+        "$WINDOWS_10_DARK_THEME_UUID/gtk-3.0/gtk.css"
+        "$WINDOWS_10_DARK_THEME_UUID/gtk-4.0/gtk.css"
+    )
+
+    verify_file_sha256_and_size "$archive" "$WINDOWS_10_DARK_THEME_SHA256" \
+        "$WINDOWS_10_DARK_THEME_SIZE" || return 1
+    unzip -tqq "$archive" >/dev/null 2>&1 || return 1
+    listing=$(unzip -Z1 "$archive") || return 1
+    [[ -n "$listing" ]] || return 1
+    while IFS= read -r entry; do
+        [[ "$entry" == "$WINDOWS_10_DARK_THEME_UUID/"* ]] || return 1
+        [[ "$entry" != /* && "$entry" != *\\* && "$entry" != *"/../"* &&
+            "$entry" != *"/.." ]] || return 1
+    done <<<"$listing"
+    for entry in "${required_files[@]}"; do
+        grep -Fqx "$entry" <<<"$listing" || return 1
+    done
+    index_theme=$(unzip -p "$archive" "$WINDOWS_10_DARK_THEME_UUID/index.theme") || return 1
+    grep -qx "Name=$WINDOWS_10_DARK_THEME_NAME" <<<"$index_theme" || return 1
+    grep -qx "GtkTheme=$WINDOWS_10_DARK_THEME_NAME" <<<"$index_theme" || return 1
+    unzip -p "$archive" "$WINDOWS_10_DARK_THEME_UUID/LICENSE.md" 2>/dev/null |
+        grep -Fq 'GNU GENERAL PUBLIC LICENSE' || return 1
+}
+
 check_wsl2() {
     grep -qi 'microsoft-standard-WSL2' /proc/sys/kernel/osrelease
 }
@@ -212,7 +271,7 @@ check_disk_space() {
 
 check_tools() {
     local command
-    local commands=(awk bash chroot cmp curl cut df diff dpkg dpkg-deb du file find findmnt flock git gpg head jq make md5sum mktemp mount mountpoint mksquashfs mv readlink realpath rm rsync sed sha256sum shellcheck sort stat sudo sync tee unsquashfs xargs xorriso)
+    local commands=(awk bash chroot cmp curl cut df diff dpkg dpkg-deb du file find findmnt flock git gpg head jq make md5sum mktemp mount mountpoint mksquashfs mv readlink realpath rm rsync sed sha256sum shellcheck sort stat sudo sync tee unzip unsquashfs xargs xorriso)
     for command in "${commands[@]}"; do
         command -v "$command" >/dev/null 2>&1 || {
             warn "Missing command: $command"
@@ -678,6 +737,24 @@ fetch_fcitx5_lotus() {
     die "Unable to authenticate a consistent Fcitx5 Lotus package after 3 attempts."
 }
 
+fetch_windows_10_dark_theme() {
+    local destination quarantine
+    destination="$WINDOWS_10_DARK_THEME_DOWNLOAD_DIR/$WINDOWS_10_DARK_THEME_SHA256/$WINDOWS_10_DARK_THEME_UUID.zip"
+
+    if [[ -f "$destination" ]] &&
+        ! validate_windows_10_dark_theme_archive "$destination"; then
+        quarantine="${destination}.invalid.$(date -u +%Y%m%dT%H%M%SZ)"
+        mv -- "$destination" "$quarantine"
+        warn "Quarantined an invalid Windows 10 Dark theme archive at $quarantine"
+    fi
+    download_atomic "$WINDOWS_10_DARK_THEME_URL" "$destination" \
+        "$WINDOWS_10_DARK_THEME_SHA256"
+    validate_windows_10_dark_theme_archive "$destination" ||
+        die "Windows 10 Dark theme archive failed integrity or content validation."
+    WINDOWS_10_DARK_THEME_ARCHIVE_PATH=$destination
+    ok "Authenticated Windows 10 Dark theme archive: $WINDOWS_10_DARK_THEME_SHA256"
+}
+
 cmd_fetch() {
     local manifest="$DOWNLOAD_DIR/sha256sum.txt"
     local signature="$DOWNLOAD_DIR/sha256sum.txt.gpg"
@@ -711,6 +788,7 @@ cmd_fetch() {
     fetch_google_chrome
     fetch_onlyoffice
     fetch_fcitx5_lotus
+    fetch_windows_10_dark_theme
 }
 
 base_iso_path() {
@@ -874,11 +952,13 @@ mount_chroot() {
 }
 
 install_packages_and_hooks() {
-    local hook hook_name command
+    local hook hook_name command theme_temp
     [[ -f "$CHROME_DEB_PATH" ]] || die "Authenticated Google Chrome package is unavailable."
     [[ -f "$ONLYOFFICE_DEB_PATH" ]] || die "Authenticated ONLYOFFICE package is unavailable."
     [[ -f "$FCITX5_LOTUS_DEB_PATH" ]] || die "Authenticated Fcitx5 Lotus package is unavailable."
     [[ -f "$FCITX5_LOTUS_KEY_PATH" ]] || die "Authenticated Fcitx5 Lotus keyring is unavailable."
+    validate_windows_10_dark_theme_archive "$WINDOWS_10_DARK_THEME_ARCHIVE_PATH" ||
+        die "Authenticated Windows 10 Dark theme archive is unavailable or invalid."
     save_and_enable_dns
     printf '#!/bin/sh\nexit 101\n' | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" >/dev/null
     sudo chmod 0755 "$ROOTFS/usr/sbin/policy-rc.d"
@@ -920,6 +1000,22 @@ install_packages_and_hooks() {
                 xargs -r apt-get purge -y --
         '
 
+    log "Installing the authenticated Windows 10 Dark theme..."
+    theme_temp=$(with_temp_dir)
+    TEMP_PATHS+=("$theme_temp")
+    unzip -q "$WINDOWS_10_DARK_THEME_ARCHIVE_PATH" -d "$theme_temp"
+    [[ -d "$theme_temp/$WINDOWS_10_DARK_THEME_UUID" ]] ||
+        die "Windows 10 Dark theme archive did not produce its expected directory."
+    if find "$theme_temp/$WINDOWS_10_DARK_THEME_UUID" -type l -print -quit | grep -q .; then
+        die "Windows 10 Dark theme archive unexpectedly contains a symbolic link."
+    fi
+    [[ ! -e "$ROOTFS/usr/share/themes/$WINDOWS_10_DARK_THEME_UUID" ]] ||
+        die "Windows 10 Dark theme destination already exists in the base image."
+    chmod -R u=rwX,go=rX "$theme_temp/$WINDOWS_10_DARK_THEME_UUID"
+    sudo mkdir -p "$ROOTFS/usr/share/themes/$WINDOWS_10_DARK_THEME_UUID"
+    sudo rsync -aH "$theme_temp/$WINDOWS_10_DARK_THEME_UUID/" \
+        "$ROOTFS/usr/share/themes/$WINDOWS_10_DARK_THEME_UUID/"
+
     log "Applying the NapOS filesystem overlay..."
     sudo rsync -aHAX "$CONFIG_DIR/overlay/" "$ROOTFS/"
 
@@ -958,6 +1054,7 @@ validate_customized_rootfs() {
     )
     local packages=(
         vlc flameshot git copyq curl htop vim ttf-mscorefonts-installer
+        gtk2-engines-murrine gtk2-engines-pixbuf
         fcitx5 fcitx5-config-qt fcitx5-frontend-all
     )
     local remove_packages=()
@@ -984,6 +1081,14 @@ validate_customized_rootfs() {
         [[ -f /usr/share/backgrounds/napos/napos-wallpaper.svg ]]
         [[ -f /usr/share/icons/hicolor/scalable/apps/napos-logo.svg ]]
         [[ -s /etc/dconf/db/local ]]
+        [[ -f /usr/share/themes/Windows-10-Dark/index.theme ]]
+        [[ -f /usr/share/themes/Windows-10-Dark/gtk-2.0/gtkrc ]]
+        [[ -f /usr/share/themes/Windows-10-Dark/gtk-3.0/gtk.css ]]
+        [[ -f /usr/share/themes/Windows-10-Dark/gtk-4.0/gtk.css ]]
+        [[ -f /usr/share/themes/Windows-10-Dark/LICENSE.md ]]
+        grep -qx "Name=Windows-10-Dark" /usr/share/themes/Windows-10-Dark/index.theme
+        grep -qx "GtkTheme=Windows-10-Dark" /usr/share/themes/Windows-10-Dark/index.theme
+        ! grep -Rqs "/org/cinnamon/desktop/interface/gtk-theme" /etc/dconf/db/local.d/locks
         [[ -x /usr/bin/google-chrome-stable ]]
         [[ -f /usr/share/applications/google-chrome.desktop ]]
         [[ -f /usr/share/applications/vlc.desktop ]]
@@ -1108,6 +1213,8 @@ validate_customized_rootfs() {
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     validate_cinnamon_copyq_defaults "$dconf_data" ||
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
+    validate_cinnamon_application_theme_defaults "$dconf_data" ||
+        die "Cinnamon application theme default is missing or changes another theme category."
     base_reference=$(base_reference_root)
     sudo cmp -s "$ROOTFS/etc/lsb-release" "$base_reference/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
@@ -1239,7 +1346,8 @@ release_github_rootfs() {
 release_github_intermediates() {
     check_github_actions_ubuntu || return 0
     safe_remove_tree "$ISO_TREE" "$WORK_DIR"
-    for path in "$CHROME_DOWNLOAD_DIR" "$ONLYOFFICE_DOWNLOAD_DIR" "$FCITX5_LOTUS_DOWNLOAD_DIR"; do
+    for path in "$CHROME_DOWNLOAD_DIR" "$ONLYOFFICE_DOWNLOAD_DIR" "$FCITX5_LOTUS_DOWNLOAD_DIR" \
+        "$WINDOWS_10_DARK_THEME_DOWNLOAD_DIR"; do
         [[ -e "$path" ]] || continue
         safe_remove_tree "$path" "$CACHE_DIR"
     done
@@ -1305,6 +1413,12 @@ write_build_info() {
         --arg lotus_repository_suite "$UBUNTU_CODENAME" \
         --arg lotus_repository_package_path "$FCITX5_LOTUS_REPOSITORY_PACKAGE_PATH" \
         --arg lotus_signing_fingerprint "$FCITX5_LOTUS_SIGNING_FINGERPRINT" \
+        --arg theme_name "$WINDOWS_10_DARK_THEME_NAME" \
+        --arg theme_url "$WINDOWS_10_DARK_THEME_URL" \
+        --arg theme_catalog_commit "$WINDOWS_10_DARK_THEME_CATALOG_COMMIT" \
+        --arg theme_size "$WINDOWS_10_DARK_THEME_SIZE" \
+        --arg theme_sha256 "$WINDOWS_10_DARK_THEME_SHA256" \
+        --arg theme_license "$WINDOWS_10_DARK_THEME_LICENSE" \
         --arg timestamp "$BUILD_TIMESTAMP" \
         --arg xorriso_version "$(xorriso -version 2>&1 | head -n1)" \
         --arg squashfs_version "$(unsquashfs -version 2>&1 | head -n1)" \
@@ -1327,7 +1441,10 @@ write_build_info() {
                     architecture:$lotus_architecture, sha256:$lotus_sha256,
                     repository:$lotus_repository, repository_suite:$lotus_repository_suite,
                     repository_package_path:$lotus_repository_package_path,
-                    signing_fingerprint:$lotus_signing_fingerprint}},
+                    signing_fingerprint:$lotus_signing_fingerprint},
+                  windows_10_dark_theme:{name:$theme_name, url:$theme_url,
+                    catalog_commit:$theme_catalog_commit, size:($theme_size | tonumber),
+                    sha256:$theme_sha256, license:$theme_license}},
           built_at:$timestamp, tools:{xorriso:$xorriso_version, squashfs:$squashfs_version},
           duration_seconds:$duration_seconds, byte_reproducible:false}' >"$info"
 }
@@ -1398,7 +1515,7 @@ cmd_verify() {
     local onlyoffice_version onlyoffice_launcher office_mime
     local lotus_source_file lotus_key_file lotus_key_fingerprint lotus_version
     local fcitx_environment fcitx_profile fcitx_config lotus_user_unit lotus_server_unit
-    local copyq_autostart mimeapps mint_mimeapps grouped_window_list panel_launchers
+    local copyq_autostart mimeapps mint_mimeapps grouped_window_list panel_launchers theme_index theme_file
     local application_defaults launcher_defaults
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
@@ -1657,6 +1774,8 @@ cmd_verify() {
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     validate_cinnamon_copyq_defaults "$dconf_data" ||
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
+    validate_cinnamon_application_theme_defaults "$dconf_data" ||
+        die "Cinnamon application theme default is missing or changes another theme category."
     grep -q '^Name=Install NapOS$' <<<"$installer" || die "Installer launcher is not branded Install NapOS."
     grep -q '^Name\[vi\]=Cài đặt NapOS$' <<<"$installer" || die "Vietnamese installer label is not branded Cài đặt NapOS."
     grep -q '^Icon=napos-logo$' <<<"$installer" || die "Installer launcher icon is not NapOS."
@@ -1668,8 +1787,21 @@ cmd_verify() {
     unsquashfs -cat "$temp/filesystem.squashfs" \
         usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf >/dev/null 2>&1 ||
         die "Microsoft Times New Roman font payload is missing."
+    theme_index=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/themes/Windows-10-Dark/index.theme 2>/dev/null) ||
+        die "Windows 10 Dark theme metadata is missing."
+    grep -qx "Name=$WINDOWS_10_DARK_THEME_NAME" <<<"$theme_index" ||
+        die "Windows 10 Dark theme metadata has the wrong name."
+    grep -qx "GtkTheme=$WINDOWS_10_DARK_THEME_NAME" <<<"$theme_index" ||
+        die "Windows 10 Dark theme metadata has the wrong GTK theme."
+    for theme_file in gtk-2.0/gtkrc gtk-3.0/gtk.css gtk-4.0/gtk.css LICENSE.md; do
+        unsquashfs -cat "$temp/filesystem.squashfs" \
+            "usr/share/themes/Windows-10-Dark/$theme_file" >/dev/null 2>&1 ||
+            die "Windows 10 Dark theme payload is missing: $theme_file"
+    done
 
     for package in vlc flameshot git copyq curl htop vim ibus ttf-mscorefonts-installer \
+        gtk2-engines-murrine gtk2-engines-pixbuf \
         fcitx5 fcitx5-config-qt fcitx5-frontend-all \
         "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
         grep -Eq "^${package} " "$temp/filesystem.manifest" || die "Package is absent from filesystem.manifest: $package"
@@ -1770,6 +1902,24 @@ cmd_verify() {
             die "Adjacent provenance has an unexpected Fcitx5 Lotus signing fingerprint."
         [[ "$(jq -r .source.fcitx5_lotus.sha256 "$build_info")" =~ ^[a-f0-9]{64}$ ]] ||
             die "Adjacent provenance has an invalid Fcitx5 Lotus SHA-256."
+        [[ "$(jq -r .source.windows_10_dark_theme.name "$build_info")" == \
+            "$WINDOWS_10_DARK_THEME_NAME" ]] ||
+            die "Adjacent provenance has an unexpected Windows 10 Dark theme name."
+        [[ "$(jq -r .source.windows_10_dark_theme.url "$build_info")" == \
+            "$WINDOWS_10_DARK_THEME_URL" ]] ||
+            die "Adjacent provenance has an unexpected Windows 10 Dark theme URL."
+        [[ "$(jq -r .source.windows_10_dark_theme.catalog_commit "$build_info")" == \
+            "$WINDOWS_10_DARK_THEME_CATALOG_COMMIT" ]] ||
+            die "Adjacent provenance has an unexpected Windows 10 Dark theme catalog commit."
+        [[ "$(jq -r .source.windows_10_dark_theme.size "$build_info")" == \
+            "$WINDOWS_10_DARK_THEME_SIZE" ]] ||
+            die "Adjacent provenance has an unexpected Windows 10 Dark theme size."
+        [[ "$(jq -r .source.windows_10_dark_theme.sha256 "$build_info")" == \
+            "$WINDOWS_10_DARK_THEME_SHA256" ]] ||
+            die "Adjacent provenance has an unexpected Windows 10 Dark theme SHA-256."
+        [[ "$(jq -r .source.windows_10_dark_theme.license "$build_info")" == \
+            "$WINDOWS_10_DARK_THEME_LICENSE" ]] ||
+            die "Adjacent provenance has an unexpected Windows 10 Dark theme license."
     fi
     ok "NapOS identity, packages, locale, timezone, artwork, and installer metadata are valid."
     ok "Verified ISO: $iso"
@@ -1791,6 +1941,7 @@ cmd_inspect() {
     unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
     printf '\nSelected packages:\n'
     for package in vlc flameshot git copyq curl htop vim ttf-mscorefonts-installer \
+        gtk2-engines-murrine gtk2-engines-pixbuf \
         fcitx5 fcitx5-config-qt fcitx5-frontend-all \
         "$GOOGLE_CHROME_PACKAGE" "$ONLYOFFICE_PACKAGE" "$FCITX5_LOTUS_PACKAGE"; do
         awk -v wanted="$package" '$1 == wanted {print; found=1} END {if (!found) print wanted " (missing)"}' \

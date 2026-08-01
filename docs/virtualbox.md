@@ -22,7 +22,9 @@ cp ~/napos/dist/NapOS-0.1.0-dev-cinnamon-amd64.iso \
 
 1. Leave EFI disabled and attach the development ISO.
 2. Boot the live desktop and confirm the NapOS wallpaper. Confirm the Cinnamon
-   menu and grouped application list are centered on the panel.
+   menu and grouped application list are centered on the panel. In **System
+   Settings → Themes**, confirm Applications is `Windows-10-Dark` while Mouse
+   Pointer, Icons, Desktop, and window borders retain the Linux Mint defaults.
 3. Open `Install NapOS` and install to the VDI.
 4. Shut down, eject the ISO, and boot the installed system.
 5. Confirm applications, Google Chrome as the default browser, no Firefox or
@@ -33,11 +35,13 @@ cp ~/napos/dist/NapOS-0.1.0-dev-cinnamon-amd64.iso \
    ODT, ODS, and ODP defaults were not reassigned to ONLYOFFICE.
 7. Rearrange one panel applet, log out and back in, and confirm the customized
    layout persists instead of being reset to the NapOS default.
-8. Confirm Fcitx5 starts in English mode, `Fcitx5 Configuration` lists both the
+8. Change the Applications theme, log out and back in, and confirm the user
+   choice persists rather than being forced back to `Windows-10-Dark`.
+9. Confirm Fcitx5 starts in English mode, `Fcitx5 Configuration` lists both the
    English keyboard and Lotus, and Ctrl+Space enables Vietnamese typing. Type
    `tieengs Vieetj` and confirm `tiếng Việt` in a GTK editor, Chrome, and
    ONLYOFFICE.
-9. Confirm `systemctl status fcitx5-lotus-server@$(id -u).service` is active in
+10. Confirm `systemctl status fcitx5-lotus-server@$(id -u).service` is active in
    both the live session and the installed system, and that `apt update`
    authenticates the constrained Lotus repository without warnings.
 

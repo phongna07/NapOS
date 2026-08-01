@@ -17,7 +17,8 @@ make dev
 
 `make dev` is the complete development workflow. It authenticates and caches
 the Mint ISO, current Google Chrome stable package, and current ONLYOFFICE
-Desktop Editors package; makes a fresh work tree; installs selected packages,
+Desktop Editors package and the pinned Windows 10 Dark Cinnamon theme; makes a
+fresh work tree; installs selected packages,
 downloads and installs the Microsoft TrueType core fonts after accepting their
 EULA, removes Firefox, applies NapOS customization,
 builds an LZ4 SquashFS, preserves Mint's BIOS and EFI boot equipment, verifies
@@ -62,9 +63,9 @@ build-release.log
 The artifact is retained for one day to limit storage usage on GitHub Free, so
 download it promptly and verify it with `sha256sum -c`. The workflow cache holds
 only the pinned Mint ISO and its isolated GPG state. Chrome, ONLYOFFICE, and
-Fcitx5 Lotus are resolved and authenticated from current signed repository
-metadata on every release; expanded root filesystems and disposable work trees
-are never cached.
+Fcitx5 Lotus are resolved from current signed repository metadata, and the
+checksum-pinned theme archive is downloaded on every release; expanded root
+filesystems and disposable work trees are never cached.
 
 GitHub builds use a storage-efficient work path that expands the base directly
 into `work/` and releases large intermediate trees as soon as they are no longer
@@ -77,7 +78,7 @@ commands and their reusable base cache are unchanged.
 | --- | --- |
 | `make help` | Prints the supported interface without network or root access. |
 | `make doctor` | Checks WSL2 or GitHub-hosted Ubuntu, native storage, 30 GiB free space, tools, sudo, and temporary mount capability. |
-| `make fetch` | Authenticates and caches the Mint ISO plus the latest Chrome, ONLYOFFICE, and Fcitx5 Lotus amd64 `.deb` files selected through signed repository metadata. |
+| `make fetch` | Authenticates and caches the Mint ISO, latest Chrome, ONLYOFFICE, and Fcitx5 Lotus amd64 `.deb` files, and the checksum-pinned Windows 10 Dark theme. |
 | `make dev` | Fetches current authenticated inputs, then builds and verifies a fresh LZ4 ISO. |
 | `make release` | Fetches current authenticated inputs, then builds and verifies a fresh XZ ISO. |
 | `make verify ISO=...` | Rechecks SHA-256, volume, BIOS/EFI entries, embedded identity, packages, artwork, locale, timezone, and installer launcher. |
@@ -94,7 +95,8 @@ under `dist/`.
 1. **Doctor:** fails early if the host cannot safely build an ISO.
 2. **Fetch:** authenticates the signed Mint checksum manifest before trusting
    the ISO checksum, and authenticates Chrome, ONLYOFFICE, and Fcitx5 Lotus
-   through their signed APT metadata and pinned signing-key fingerprints.
+   through their signed APT metadata and pinned signing-key fingerprints, then
+   verifies the Windows 10 Dark theme against its committed size and SHA-256.
 3. **Base cache:** extracts ISO content with `xorriso` and expands SquashFS once
    into a cache keyed by the authenticated ISO hash.
 4. **Fresh work tree:** copies the immutable cache for every build so package
@@ -104,7 +106,8 @@ under `dist/`.
    Google Chrome, ONLYOFFICE, and Fcitx5 Lotus `.deb` files; pre-accepts the
    Microsoft font EULA for the noninteractive build, downloads the checksummed
    font payload through Ubuntu's installer package, configures Lotus for every
-   live and installed user; purges
+   live and installed user; installs Windows 10 Dark system-wide and selects it
+   only as the user-overridable GTK Applications theme; purges
    Firefox and its language packs, Mint Chat, Celluloid, and the complete
    LibreOffice suite; makes Chrome the default browser and ONLYOFFICE the
    default for Microsoft Office, RTF, and CSV files; and applies
@@ -120,8 +123,9 @@ under `dist/`.
 Builds are intentionally not claimed to be byte-reproducible: package versions
 are resolved from live Linux Mint, Ubuntu, Google, ONLYOFFICE, and Fcitx5 Lotus repositories.
 The adjacent JSON records the source and tool inputs for each build, including
-the exact Chrome, ONLYOFFICE, and Fcitx5 Lotus versions and SHA-256 values plus hashes of the
-package installation and removal policies. Repository additions are listed in `config/packages.txt`;
+the exact Chrome, ONLYOFFICE, and Fcitx5 Lotus versions and SHA-256 values, the
+pinned Windows 10 Dark source metadata, plus hashes of the package installation
+and removal policies. Repository additions are listed in `config/packages.txt`;
 base-image removals are listed in `config/packages-remove.txt`.
 
 ## NapOS identity policy

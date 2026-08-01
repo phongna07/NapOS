@@ -105,6 +105,35 @@ invalid_fcitx5_lotus_fingerprint_config() (
 expect_failure "Invalid Fcitx5 Lotus signing fingerprint is rejected" \
     invalid_fcitx5_lotus_fingerprint_config
 
+invalid_theme_url_config() (
+    # shellcheck disable=SC2030
+    local WINDOWS_10_DARK_THEME_URL=https://example.invalid/Windows-10-Dark.zip
+    validate_config 2>/dev/null
+)
+expect_failure "Untrusted Windows 10 Dark theme URL is rejected" invalid_theme_url_config
+
+invalid_theme_commit_config() (
+    # shellcheck disable=SC2030
+    local WINDOWS_10_DARK_THEME_CATALOG_COMMIT=not-a-commit
+    validate_config 2>/dev/null
+)
+expect_failure "Invalid Windows 10 Dark theme catalog commit is rejected" \
+    invalid_theme_commit_config
+
+invalid_theme_size_config() (
+    # shellcheck disable=SC2030
+    local WINDOWS_10_DARK_THEME_SIZE=not-a-size
+    validate_config 2>/dev/null
+)
+expect_failure "Invalid Windows 10 Dark theme archive size is rejected" invalid_theme_size_config
+
+invalid_theme_sha_config() (
+    # shellcheck disable=SC2030
+    local WINDOWS_10_DARK_THEME_SHA256=0000
+    validate_config 2>/dev/null
+)
+expect_failure "Invalid Windows 10 Dark theme SHA-256 is rejected" invalid_theme_sha_config
+
 alternate_version_config() (
     # shellcheck disable=SC2030
     NAPOS_VERSION=9.8.7
@@ -191,6 +220,20 @@ else
     fail "Fcitx5 Lotus signing fingerprint equals the committed pin"
 fi
 
+# shellcheck disable=SC2031
+if [[ "$WINDOWS_10_DARK_THEME_URL" == \
+        "https://cinnamon-spices.linuxmint.com/files/themes/Windows-10-Dark.zip" ]] &&
+    [[ "$WINDOWS_10_DARK_THEME_CATALOG_COMMIT" == \
+        "deb844046fcf260a85d94c865aa83fd50e5b052b" ]] &&
+    [[ "$WINDOWS_10_DARK_THEME_SIZE" == "1165638" ]] &&
+    [[ "$WINDOWS_10_DARK_THEME_SHA256" == \
+        "5154158e055c035728b90095ff93045b1ed030280d149571c8a765e333d44d35" ]] &&
+    [[ "$WINDOWS_10_DARK_THEME_LICENSE" == "GPL-3.0" ]]; then
+    pass "Windows 10 Dark theme source equals the reviewed official pin"
+else
+    fail "Windows 10 Dark theme source equals the reviewed official pin"
+fi
+
 printf 'NapOS checksum fixture\n' >"$safe_root/payload"
 expected=$(sha256sum "$safe_root/payload" | awk '{print $1}')
 actual=$(sha256_of "$safe_root/payload")
@@ -205,6 +248,44 @@ if [[ "$(sha256_of "$safe_root/payload")" != "$expected" ]]; then
 else
     fail "Checksum helper detects tampering"
 fi
+
+eval "$(sed -n '/^validate_windows_10_dark_theme_archive()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")"
+python3 - "$safe_root/theme-valid.zip" "$safe_root/theme-invalid.zip" <<'PY'
+import sys
+import zipfile
+
+valid_path, invalid_path = sys.argv[1:]
+files = {
+    "Windows-10-Dark/LICENSE.md": "GNU GENERAL PUBLIC LICENSE\n",
+    "Windows-10-Dark/index.theme": (
+        "[Desktop Entry]\nName=Windows-10-Dark\n"
+        "[X-GNOME-Metatheme]\nGtkTheme=Windows-10-Dark\n"
+    ),
+    "Windows-10-Dark/gtk-2.0/gtkrc": "# fixture\n",
+    "Windows-10-Dark/gtk-3.0/gtk.css": "/* fixture */\n",
+    "Windows-10-Dark/gtk-4.0/gtk.css": "/* fixture */\n",
+}
+with zipfile.ZipFile(valid_path, "w") as archive:
+    for name, content in files.items():
+        archive.writestr(name, content)
+with zipfile.ZipFile(invalid_path, "w") as archive:
+    for name, content in files.items():
+        archive.writestr(name, content)
+    archive.writestr("outside-theme-root", "invalid\n")
+PY
+
+validate_theme_fixture() (
+    WINDOWS_10_DARK_THEME_SHA256=$(sha256_of "$1")
+    WINDOWS_10_DARK_THEME_SIZE=$(stat -c '%s' "$1")
+    validate_windows_10_dark_theme_archive "$1"
+)
+expect_success "Windows 10 Dark theme archive validator accepts the expected payload" \
+    validate_theme_fixture "$safe_root/theme-valid.zip"
+expect_failure "Windows 10 Dark theme archive validator rejects files outside its UUID root" \
+    validate_theme_fixture "$safe_root/theme-invalid.zip"
+expect_failure "Windows 10 Dark theme archive validator rejects a checksum mismatch" \
+    validate_windows_10_dark_theme_archive "$safe_root/theme-valid.zip"
 
 printf 'Authenticated Chrome fixture\n' >"$safe_root/chrome.deb"
 chrome_fixture_sha=$(sha256_of "$safe_root/chrome.deb")
@@ -447,7 +528,7 @@ expect_failure "Installed package conffile rejects modified content" \
 expect_failure "Installed package conffile rejects the wrong owning package" \
     verify_installed_conffile "$conffile_root" unexpected-package "$conffile_path"
 
-expected_packages=$'copyq\ncurl\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngit\nhtop\nttf-mscorefonts-installer\nvim\nvlc'
+expected_packages=$'copyq\ncurl\nfcitx5\nfcitx5-config-qt\nfcitx5-frontend-all\nflameshot\ngit\ngtk2-engines-murrine\ngtk2-engines-pixbuf\nhtop\nttf-mscorefonts-installer\nvim\nvlc'
 actual_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$PROJECT_ROOT/config/packages.txt" | sort)
 if [[ "$actual_packages" == "$expected_packages" ]]; then
     pass "Desktop-essential package profile is exact"
@@ -565,6 +646,16 @@ if grep -Fq "fcitx5_lotus:{package:\$lotus_package" <<<"$build_info_function" &&
     pass "Build provenance records and verifies authenticated Fcitx5 Lotus inputs"
 else
     fail "Build provenance records and verifies authenticated Fcitx5 Lotus inputs"
+fi
+
+# shellcheck disable=SC2016
+if grep -Fq 'windows_10_dark_theme:{name:$theme_name' <<<"$build_info_function" &&
+    grep -Fq '.source.windows_10_dark_theme.catalog_commit' <<<"$verify_function" &&
+    grep -Fq '.source.windows_10_dark_theme.sha256' <<<"$verify_function" &&
+    grep -Fq 'fetch_windows_10_dark_theme' "$PROJECT_ROOT/tools/napos-build"; then
+    pass "Build fetches, records, and verifies the pinned Windows 10 Dark theme"
+else
+    fail "Build fetches, records, and verifies the pinned Windows 10 Dark theme"
 fi
 
 expected_remove_packages=$(cat <<'EOF'
@@ -748,6 +839,8 @@ eval "$(sed -n '/^validate_cinnamon_panel_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_copyq_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
+eval "$(sed -n '/^validate_cinnamon_application_theme_defaults()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")"
 dconf_defaults=$(awk '
     index($0, "cat >/etc/dconf/db/local.d/00-napos") { active=1; next }
     active && $0 == "EOF" { exit }
@@ -769,6 +862,29 @@ expect_success "Cinnamon defaults bind Super+V to the CopyQ history toggle" \
 invalid_copyq_defaults=${dconf_defaults//<Super>v/<Super>x}
 expect_failure "Cinnamon CopyQ defaults reject an incorrect shortcut" \
     validate_cinnamon_copyq_defaults "$invalid_copyq_defaults"
+expect_success "Cinnamon defaults select Windows-10-Dark for Applications only" \
+    validate_cinnamon_application_theme_defaults "$dconf_defaults"
+wrong_application_theme=${dconf_defaults/gtk-theme=\'Windows-10-Dark\'/gtk-theme=\'Mint-Y-Aqua\'}
+expect_failure "Cinnamon defaults reject the wrong Applications theme" \
+    validate_cinnamon_application_theme_defaults "$wrong_application_theme"
+icon_theme_defaults=${dconf_defaults/gtk-theme=\'Windows-10-Dark\'/$'gtk-theme=\'Windows-10-Dark\'\nicon-theme=\'Windows-10-Icons\''}
+expect_failure "Cinnamon Applications default rejects an accompanying icon change" \
+    validate_cinnamon_application_theme_defaults "$icon_theme_defaults"
+cursor_theme_defaults=${dconf_defaults/gtk-theme=\'Windows-10-Dark\'/$'gtk-theme=\'Windows-10-Dark\'\ncursor-theme=\'DMZ-White\''}
+expect_failure "Cinnamon Applications default rejects an accompanying pointer change" \
+    validate_cinnamon_application_theme_defaults "$cursor_theme_defaults"
+desktop_theme_defaults=$dconf_defaults$'\n[org/cinnamon/theme]\nname=\'Windows-10-Dark\''
+expect_failure "Cinnamon Applications default rejects an accompanying desktop-theme change" \
+    validate_cinnamon_application_theme_defaults "$desktop_theme_defaults"
+window_theme_defaults=$dconf_defaults$'\n[org/cinnamon/desktop/wm/preferences]\ntheme=\'Windows-10-Dark\''
+expect_failure "Cinnamon Applications default rejects an accompanying window-border change" \
+    validate_cinnamon_application_theme_defaults "$window_theme_defaults"
+
+if ! rg -n '/org/cinnamon/desktop/interface/gtk-theme' "$PROJECT_ROOT/config" >/dev/null; then
+    pass "Windows 10 Dark Applications default is not locked"
+else
+    fail "Windows 10 Dark Applications default is not locked"
+fi
 
 if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then
     fail 'Incorrect product spelling "Napos" exists in configuration or assets'

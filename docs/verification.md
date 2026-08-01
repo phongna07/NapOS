@@ -75,6 +75,9 @@ Verification requires:
   defaults, with the remaining Mint panel applets preserved.
 - CopyQ installed with a system-wide hidden autostart entry and a user-overridable
   Cinnamon `Super+V` shortcut that runs `copyq toggle`.
+- The authenticated `Windows-10-Dark` theme payload installed system-wide and
+  selected only for Cinnamon's Applications theme, without a dconf lock or
+  pointer, icon, desktop-shell, or window-border override.
 - Installer label `Install NapOS`.
 - All selected desktop packages in `filesystem.manifest`.
 - The `ttf-mscorefonts-installer` package plus its Arial and Times New Roman
@@ -108,7 +111,8 @@ Verification requires:
 
 Inspection prints the SquashFS compression and the adjacent provenance JSON.
 The JSON records the exact Chrome, ONLYOFFICE, and Fcitx5 Lotus versions,
-SHA-256 values, repository package paths, signing fingerprints, and
+SHA-256 values, repository package paths, signing fingerprints, the pinned
+Windows 10 Dark theme URL, catalog commit, size, SHA-256, and license, and the
 package-removal policy hash used by the build.
 
 ## 5. Release build
