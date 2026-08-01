@@ -1,7 +1,7 @@
 - [x] github action
 - [ ] versioning and branching
 - [x] Change background
-- [ ] Change logo
+- [x] Change logo
 - [x] Remove firefox
 - [x] Remove libreoffice
 - [x] remove celluloid media player
@@ -18,5 +18,5 @@
 - [x] dark theme
 - [ ] fastfetch
 - [x] set "Install multimedia codecs" as the default
-- [ ] Change GRUB boot name (currently Linux Mint)
+- [x] Change GRUB boot name (currently Linux Mint)
 - [ ] OTA update

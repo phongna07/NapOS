@@ -72,6 +72,9 @@ EOF
 cat >/etc/dconf/db/local.d/00-napos <<'EOF'
 [org/cinnamon]
 enabled-applets=['panel1:center:0:menu@cinnamon.org', 'panel1:left:1:separator@cinnamon.org', 'panel1:center:1:grouped-window-list@cinnamon.org', 'panel1:right:0:systray@cinnamon.org', 'panel1:right:1:xapp-status@cinnamon.org', 'panel1:right:2:notifications@cinnamon.org', 'panel1:right:3:printers@cinnamon.org', 'panel1:right:4:removable-drives@cinnamon.org', 'panel1:right:5:keyboard@cinnamon.org', 'panel1:right:6:favorites@cinnamon.org', 'panel1:right:7:network@cinnamon.org', 'panel1:right:8:sound@cinnamon.org', 'panel1:right:9:power@cinnamon.org', 'panel1:right:10:calendar@cinnamon.org', 'panel1:right:11:cornerbar@cinnamon.org']
+startup-icon-name='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'
+system-icon='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'
+app-menu-icon-name='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'
 
 [org/cinnamon/desktop/interface]
 gtk-theme='Windows-10-Dark'
@@ -451,11 +454,100 @@ done
     exit 1
 }
 
+printf '[NapOS] Branding Ubiquity artwork and icon lookups...\n'
+for ubiquity_module in \
+    /usr/lib/ubiquity/ubiquity/gtkwidgets.py \
+    /usr/lib/ubiquity/plugins/ubi-partman.py; do
+    [[ -f "$ubiquity_module" ]] || {
+        printf 'Required Ubiquity module is missing: %s\n' "$ubiquity_module" >&2
+        exit 1
+    }
+    sed -i "s/'distributor-logo'/'napos-logo'/g" "$ubiquity_module"
+    if grep -Fq "'distributor-logo'" "$ubiquity_module"; then
+        printf 'Mint distributor icon lookup remains in: %s\n' "$ubiquity_module" >&2
+        exit 1
+    fi
+done
+for artwork in \
+    /usr/share/ubiquity/pixmaps/ubuntu/logo.png \
+    /usr/share/ubiquity/pixmaps/ubuntu_installed.png \
+    /usr/share/ubiquity-slideshow/slides/screenshots/welcome.png \
+    /usr/share/ubiquity-slideshow/slides/screenshots/applications.png; do
+    [[ -s "$artwork" ]] || {
+        printf 'Required NapOS installer artwork is missing: %s\n' "$artwork" >&2
+        exit 1
+    }
+done
+grep -Fq 'Welcome to NapOS' /usr/share/ubiquity-slideshow/slides/welcome.html || {
+    printf 'NapOS English installer welcome slide is missing.\n' >&2
+    exit 1
+}
+grep -Fq 'Chào mừng bạn đến với NapOS' \
+    /usr/share/ubiquity-slideshow/slides/l10n/vi/welcome.html || {
+    printf 'NapOS Vietnamese installer welcome slide is missing.\n' >&2
+    exit 1
+}
+
+printf '[NapOS] Branding installed GRUB while preserving its Ubuntu EFI ID...\n'
+for grub_generator in \
+    /etc/grub.d/10_linux \
+    /etc/grub.d/10_linux_zfs \
+    /etc/grub.d/20_linux_xen; do
+    [[ -f "$grub_generator" ]] || {
+        printf 'Required installed-GRUB generator is missing: %s\n' "$grub_generator" >&2
+        exit 1
+    }
+    if ! grep -Fq 'VISIBLE_GRUB_DISTRIBUTOR=' "$grub_generator"; then
+        sed -i 's/GRUB_DISTRIBUTOR/VISIBLE_GRUB_DISTRIBUTOR/g' "$grub_generator"
+        sed -i "/^\\. .*grub-mkconfig_lib/a\\. /etc/default/grub.d/99-napos-branding.cfg\nVISIBLE_GRUB_DISTRIBUTOR=\${GRUB_VISIBLE_DISTRIBUTOR:-\${GRUB_DISTRIBUTOR:-}}" \
+            "$grub_generator"
+    fi
+    grep -Fqx '. /etc/default/grub.d/99-napos-branding.cfg' "$grub_generator" || {
+        printf 'Failed to load the NapOS GRUB override in: %s\n' "$grub_generator" >&2
+        exit 1
+    }
+    grep -Fq "VISIBLE_GRUB_DISTRIBUTOR=\${GRUB_VISIBLE_DISTRIBUTOR:-\${GRUB_DISTRIBUTOR:-}}" \
+        "$grub_generator" || {
+        printf 'Failed to separate visible GRUB branding in: %s\n' "$grub_generator" >&2
+        exit 1
+    }
+done
+
+printf '[NapOS] Installing Plymouth boot themes...\n'
+spinner_theme=/usr/share/plymouth/themes/spinner
+napos_logo_theme=/usr/share/plymouth/themes/napos-logo
+napos_text_theme=/usr/share/plymouth/themes/napos-text
+[[ -d "$spinner_theme" && -s "$napos_logo_theme/napos-logo.png" ]] || {
+    printf 'Required Plymouth source assets are missing.\n' >&2
+    exit 1
+}
+cp -a "$spinner_theme"/*.png "$napos_logo_theme/"
+install -m 0644 "$napos_logo_theme/napos-logo.png" "$napos_logo_theme/watermark.png"
+update-alternatives --install \
+    /usr/share/plymouth/themes/default.plymouth default.plymouth \
+    "$napos_logo_theme/napos-logo.plymouth" 300
+update-alternatives --set default.plymouth "$napos_logo_theme/napos-logo.plymouth"
+update-alternatives --install \
+    /usr/share/plymouth/themes/text.plymouth text.plymouth \
+    "$napos_text_theme/napos-text.plymouth" 300
+update-alternatives --set text.plymouth "$napos_text_theme/napos-text.plymouth"
+update-initramfs -u -k all
+initrd_listing=$(lsinitramfs /boot/initrd.img)
+grep -Fq 'napos-logo' <<<"$initrd_listing" || {
+    printf 'Rebuilt initramfs does not contain the NapOS Plymouth theme.\n' >&2
+    exit 1
+}
+if grep -Fq 'mint-logo' <<<"$initrd_listing"; then
+    printf 'Rebuilt initramfs still contains the selected Mint Plymouth theme.\n' >&2
+    exit 1
+fi
+
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database /usr/share/applications || true
 fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 fi
+glib-compile-schemas /usr/share/glib-2.0/schemas
 
 printf '[NapOS] Branding complete.\n'

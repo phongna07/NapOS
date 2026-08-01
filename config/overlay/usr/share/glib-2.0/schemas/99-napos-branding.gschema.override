@@ -1,0 +1,6 @@
+[x.dm.slick-greeter]
+background='/usr/share/backgrounds/napos/napos-wallpaper.svg'
+draw-user-backgrounds=false
+stretch-background-across-monitors=false
+logo='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'
+other-monitors-logo='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'

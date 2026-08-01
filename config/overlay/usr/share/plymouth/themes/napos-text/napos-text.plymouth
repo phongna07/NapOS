@@ -1,0 +1,4 @@
+[Plymouth Theme]
+Name=NapOS Text
+Description=NapOS text-mode fallback theme.
+ModuleName=details
