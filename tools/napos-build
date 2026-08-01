@@ -159,6 +159,52 @@ validate_cinnamon_panel_defaults() {
     [[ "$(awk -F'@cinnamon.org' '{ print NF - 1 }' <<<"$enabled_applets")" == "${#expected_applets[@]}" ]]
 }
 
+validate_cinnamon_desktop_defaults() {
+    local dconf_data=$1
+    awk '
+        $0 == "[org/nemo/desktop]" {
+            section="desktop"
+            next
+        }
+        /^\[/ { section="" }
+        section == "desktop" && $0 == "computer-icon-visible=true" { computer++ }
+        section == "desktop" && $0 == "home-icon-visible=true" { home++ }
+        section == "desktop" && $0 == "trash-icon-visible=true" { trash++ }
+        section == "desktop" && $0 == "volumes-visible=true" { volumes++ }
+        END { exit !(computer == 1 && home == 1 && trash == 1 && volumes == 1) }
+    ' <<<"$dconf_data"
+}
+
+validate_cinnamon_launcher_defaults() {
+    local grouped_window_list=$1
+    local panel_launchers=$2
+    local expected
+    expected='["nemo.desktop","google-chrome.desktop","onlyoffice-desktopeditors.desktop","mintinstall.desktop","cinnamon-settings.desktop","org.gnome.SystemMonitor.desktop"]'
+    jq -e --argjson expected "$expected" \
+        '."pinned-apps".default == $expected' <<<"$grouped_window_list" >/dev/null &&
+        jq -e --argjson expected "$expected" \
+            '.launcherList.default == $expected' <<<"$panel_launchers" >/dev/null
+}
+
+validate_desktop_shortcuts() {
+    local desktop_dir=$1
+    local application_dir=$2
+    local launcher
+    local required=(
+        google-chrome.desktop
+        onlyoffice-desktopeditors.desktop
+        mintinstall.desktop
+        org.gnome.SystemMonitor.desktop
+    )
+    for launcher in "${required[@]}"; do
+        [[ -f "$desktop_dir/$launcher" && -x "$desktop_dir/$launcher" ]] || return 1
+        cmp -s "$application_dir/$launcher" "$desktop_dir/$launcher" || return 1
+    done
+    for launcher in ubiquity.desktop live-installer.desktop calamares.desktop; do
+        [[ ! -e "$desktop_dir/$launcher" ]] || return 1
+    done
+}
+
 validate_cinnamon_copyq_defaults() {
     local dconf_data=$1
     awk '
@@ -1053,6 +1099,7 @@ install_packages_and_hooks() {
 validate_customized_rootfs() {
     local package chrome_key_fingerprint chrome_source dconf_data base_reference
     local lotus_key_fingerprint lotus_source apt_conffile apt_package apt_path
+    local grouped_window_list panel_launchers
     local apt_conf_diff_args=(-qr)
     local apt_preferences_diff_args=(-qr)
     local apt_sources_diff_args=(
@@ -1107,6 +1154,8 @@ validate_customized_rootfs() {
         [[ -f /usr/share/icons/Yaru/cursors/left_ptr ]]
         ! grep -RqsE "/org/cinnamon/desktop/interface/(gtk|cursor)-theme|/org/x/apps/portal/color-scheme" \
             /etc/dconf/db/local.d/locks
+        ! grep -RqsE "/org/nemo/desktop/(computer-icon-visible|home-icon-visible|trash-icon-visible|volumes-visible)" \
+            /etc/dconf/db/local.d/locks
         [[ -x /usr/bin/google-chrome-stable ]]
         [[ -f /usr/share/applications/google-chrome.desktop ]]
         [[ -f /usr/share/applications/vlc.desktop ]]
@@ -1120,6 +1169,15 @@ validate_customized_rootfs() {
         grep -qx "Exec=flameshot" /etc/xdg/autostart/org.flameshot.Flameshot.desktop
         [[ -x /usr/bin/onlyoffice-desktopeditors ]]
         [[ -f /usr/share/applications/onlyoffice-desktopeditors.desktop ]]
+        for launcher in \
+            nemo.desktop \
+            google-chrome.desktop \
+            onlyoffice-desktopeditors.desktop \
+            mintinstall.desktop \
+            cinnamon-settings.desktop \
+            org.gnome.SystemMonitor.desktop; do
+            [[ -f "/usr/share/applications/$launcher" ]]
+        done
         for font in \
             Andale_Mono.ttf Arial_Black.ttf Arial.ttf Arial_Bold.ttf \
             Arial_Bold_Italic.ttf Arial_Italic.ttf Comic_Sans_MS.ttf \
@@ -1216,12 +1274,8 @@ validate_customized_rootfs() {
             ! grep -q "=firefox.desktop$" "$mimeapps"
             ! grep -Fq "io.github.celluloid_player.Celluloid.desktop" "$mimeapps"
         done
-        for launcher_schema in \
-            /usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json \
-            /usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json; do
-            grep -q "google-chrome.desktop" "$launcher_schema"
-            ! grep -q "firefox.desktop" "$launcher_schema"
-        done
+        [[ -f /usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json ]]
+        [[ -f /usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json ]]
         grep -q "napos-wallpaper.svg" /etc/dconf/db/local.d/00-napos
         grep -Rqs "Name=Install NapOS" /usr/share/applications
         grep -Rqs "Name\[vi\]=Cài đặt NapOS" /usr/share/applications
@@ -1233,10 +1287,21 @@ validate_customized_rootfs() {
     dconf_data=$(sudo cat "$ROOTFS/etc/dconf/db/local.d/00-napos")
     validate_cinnamon_panel_defaults "$dconf_data" ||
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
+    validate_cinnamon_desktop_defaults "$dconf_data" ||
+        die "Cinnamon desktop icon defaults are incomplete or incorrect."
     validate_cinnamon_copyq_defaults "$dconf_data" ||
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
     validate_cinnamon_theme_defaults "$dconf_data" ||
         die "Cinnamon theme, pointer, or dark-mode defaults are missing or invalid."
+    grouped_window_list=$(sudo cat \
+        "$ROOTFS/usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json")
+    panel_launchers=$(sudo cat \
+        "$ROOTFS/usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json")
+    validate_cinnamon_launcher_defaults "$grouped_window_list" "$panel_launchers" ||
+        die "Cinnamon taskbar launcher defaults are incomplete or incorrectly ordered."
+    validate_desktop_shortcuts "$ROOTFS/etc/skel/Desktop" \
+        "$ROOTFS/usr/share/applications" ||
+        die "Default desktop shortcuts are missing, modified, non-executable, or include an installer."
     base_reference=$(base_reference_root)
     sudo cmp -s "$ROOTFS/etc/lsb-release" "$base_reference/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
@@ -1539,7 +1604,7 @@ cmd_verify() {
     local fcitx_environment fcitx_profile fcitx_config lotus_user_unit lotus_server_unit
     local copyq_autostart flameshot_autostart mimeapps mint_mimeapps grouped_window_list
     local panel_launchers theme_index theme_file
-    local application_defaults launcher_defaults
+    local application_defaults desktop_launcher desktop_listing installer_shortcut
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
     sidecar="${iso}.sha256"
@@ -1721,6 +1786,29 @@ cmd_verify() {
     panel_launchers=$(unsquashfs -cat "$temp/filesystem.squashfs" \
         usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json 2>/dev/null) ||
         die "Cinnamon panel-launcher defaults are missing."
+    validate_cinnamon_launcher_defaults "$grouped_window_list" "$panel_launchers" ||
+        die "Cinnamon taskbar launcher defaults are incomplete or incorrectly ordered."
+    for desktop_launcher in \
+        google-chrome.desktop \
+        onlyoffice-desktopeditors.desktop \
+        mintinstall.desktop \
+        org.gnome.SystemMonitor.desktop; do
+        unsquashfs -cat "$temp/filesystem.squashfs" \
+            "etc/skel/Desktop/$desktop_launcher" >/dev/null 2>&1 ||
+            die "Default desktop shortcut is missing: $desktop_launcher"
+        desktop_listing=$(unsquashfs -ll "$temp/filesystem.squashfs" \
+            "etc/skel/Desktop/$desktop_launcher" 2>/dev/null) ||
+            die "Default desktop shortcut metadata is missing: $desktop_launcher"
+        grep -Eq "^-rwxr-xr-x .*etc/skel/Desktop/$desktop_launcher$" \
+            <<<"$desktop_listing" ||
+            die "Default desktop shortcut is not executable: $desktop_launcher"
+    done
+    for installer_shortcut in ubiquity.desktop live-installer.desktop calamares.desktop; do
+        if unsquashfs -cat "$temp/filesystem.squashfs" \
+            "etc/skel/Desktop/$installer_shortcut" >/dev/null 2>&1; then
+            die "Installer launcher is incorrectly present in the installed-user skeleton: $installer_shortcut"
+        fi
+    done
     for application_defaults in "$mimeapps" "$mint_mimeapps"; do
         grep -qx 'application/xhtml+xml=google-chrome.desktop' <<<"$application_defaults" ||
             die "Google Chrome is not the default XHTML handler."
@@ -1784,14 +1872,6 @@ cmd_verify() {
             die "Celluloid remains assigned as a MIME handler."
         fi
     done
-    for launcher_defaults in "$grouped_window_list" "$panel_launchers"; do
-        grep -q 'google-chrome.desktop' <<<"$launcher_defaults" ||
-            die "Google Chrome is absent from a Cinnamon launcher default."
-        if grep -q 'firefox.desktop' <<<"$launcher_defaults"; then
-            die "Firefox remains in a Cinnamon launcher default."
-        fi
-    done
-
     grep -qx 'NAPOS_NAME="NapOS"' <<<"$napos_release" || die "Embedded NapOS identity is incorrect."
     grep -qx "NAPOS_VERSION=\"$NAPOS_VERSION\"" <<<"$napos_release" || die "Embedded NapOS version is incorrect."
     grep -qx 'NAME="NapOS"' <<<"$os_release" || die "os-release NAME is incorrect."
@@ -1804,6 +1884,8 @@ cmd_verify() {
     grep -q 'napos-wallpaper.svg' <<<"$dconf_data" || die "NapOS wallpaper dconf default is missing."
     validate_cinnamon_panel_defaults "$dconf_data" ||
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
+    validate_cinnamon_desktop_defaults "$dconf_data" ||
+        die "Cinnamon desktop icon defaults are incomplete or incorrect."
     validate_cinnamon_copyq_defaults "$dconf_data" ||
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
     validate_cinnamon_theme_defaults "$dconf_data" ||

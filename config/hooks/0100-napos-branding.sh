@@ -73,6 +73,12 @@ enabled-applets=['panel1:center:0:menu@cinnamon.org', 'panel1:left:1:separator@c
 gtk-theme='Windows-10-Dark'
 cursor-theme='Yaru'
 
+[org/nemo/desktop]
+computer-icon-visible=true
+home-icon-visible=true
+trash-icon-visible=true
+volumes-visible=true
+
 [org/x/apps/portal]
 color-scheme='prefer-dark'
 
@@ -288,16 +294,85 @@ for mimeapps_file in "${mimeapps_files[@]}"; do
     done
 done
 
-launcher_schemas=(
-    /usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json
-    /usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json
+set_cinnamon_launcher_defaults() {
+    local schema=$1
+    local setting=$2
+    local temporary
+    shift 2
+    temporary=$(mktemp)
+    python3 - "$schema" "$setting" "$@" >"$temporary" <<'PY'
+import json
+import sys
+
+schema_path = sys.argv[1]
+setting_name = sys.argv[2]
+launchers = sys.argv[3:]
+
+with open(schema_path, encoding="utf-8") as schema_file:
+    schema = json.load(schema_file)
+
+if setting_name not in schema or "default" not in schema[setting_name]:
+    raise SystemExit(f"Cinnamon launcher setting is missing: {setting_name}")
+
+schema[setting_name]["default"] = launchers
+json.dump(schema, sys.stdout, indent=4, ensure_ascii=False)
+sys.stdout.write("\n")
+PY
+    cat "$temporary" >"$schema"
+    rm -f -- "$temporary"
+}
+
+taskbar_launchers=(
+    nemo.desktop
+    google-chrome.desktop
+    onlyoffice-desktopeditors.desktop
+    mintinstall.desktop
+    cinnamon-settings.desktop
+    org.gnome.SystemMonitor.desktop
 )
-for launcher_schema in "${launcher_schemas[@]}"; do
+for launcher in "${taskbar_launchers[@]}"; do
+    [[ -f "/usr/share/applications/$launcher" ]] || {
+        printf 'Required taskbar launcher is missing: %s\n' "/usr/share/applications/$launcher" >&2
+        exit 1
+    }
+done
+grouped_window_schema=/usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json
+panel_launchers_schema=/usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json
+for launcher_schema in "$grouped_window_schema" "$panel_launchers_schema"; do
     [[ -f "$launcher_schema" ]] || {
         printf 'Required Cinnamon launcher schema is missing: %s\n' "$launcher_schema" >&2
         exit 1
     }
-    sed -i 's/firefox\.desktop/google-chrome.desktop/g' "$launcher_schema"
+done
+set_cinnamon_launcher_defaults "$grouped_window_schema" pinned-apps "${taskbar_launchers[@]}"
+set_cinnamon_launcher_defaults "$panel_launchers_schema" launcherList "${taskbar_launchers[@]}"
+
+install_desktop_shortcuts() {
+    local application_dir=$1
+    local desktop_dir=$2
+    local launcher
+    shift 2
+    mkdir -p "$desktop_dir"
+    for launcher in "$@"; do
+        [[ -f "$application_dir/$launcher" ]] || {
+            printf 'Required desktop shortcut source is missing: %s\n' \
+                "$application_dir/$launcher" >&2
+            return 1
+        }
+        install -m 0755 "$application_dir/$launcher" "$desktop_dir/$launcher"
+    done
+}
+
+desktop_shortcuts=(
+    google-chrome.desktop
+    onlyoffice-desktopeditors.desktop
+    mintinstall.desktop
+    org.gnome.SystemMonitor.desktop
+)
+install_desktop_shortcuts /usr/share/applications /etc/skel/Desktop \
+    "${desktop_shortcuts[@]}"
+for installer_shortcut in ubiquity.desktop live-installer.desktop calamares.desktop; do
+    rm -f -- "/etc/skel/Desktop/$installer_shortcut"
 done
 
 printf '[NapOS] Branding the installer launcher...\n'
@@ -326,12 +401,6 @@ done
     printf 'No supported Mint installer desktop launcher was found.\n' >&2
     exit 1
 }
-
-if [[ -f /usr/share/applications/ubiquity.desktop ]]; then
-    mkdir -p /etc/skel/Desktop
-    cp /usr/share/applications/ubiquity.desktop /etc/skel/Desktop/ubiquity.desktop
-    chmod 0755 /etc/skel/Desktop/ubiquity.desktop
-fi
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database /usr/share/applications || true

@@ -11,7 +11,7 @@
 - [x] OnlyOffice
 - [x] config vlc media player as the default
 - [x] clipboard history
-- [ ] add desktop icons and taskbar icons
+- [x] add desktop icons and taskbar icons
 - [x] center the taskbar
 - [x] edit the minimize, maximize, close buttons for each windows (Windows-10-Dark set the Applications option in Themes)
 - [x] mouse pointer "Yaru"

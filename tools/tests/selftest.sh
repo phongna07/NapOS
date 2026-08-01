@@ -769,12 +769,10 @@ else
 fi
 
 if grep -Fq "s/=firefox\\.desktop\$/=google-chrome.desktop/" \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
-    grep -Fq "s/firefox\\.desktop/google-chrome.desktop/g" \
-        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
-    pass "Desktop customization replaces Firefox defaults with Google Chrome"
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+    pass "Desktop application defaults replace Firefox with Google Chrome"
 else
-    fail "Desktop customization replaces Firefox defaults with Google Chrome"
+    fail "Desktop application defaults replace Firefox with Google Chrome"
 fi
 
 mimeapps_fixture="$safe_root/mimeapps.list"
@@ -846,6 +844,12 @@ fi
 
 eval "$(sed -n '/^validate_cinnamon_panel_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
+eval "$(sed -n '/^validate_cinnamon_desktop_defaults()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")"
+eval "$(sed -n '/^validate_cinnamon_launcher_defaults()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")"
+eval "$(sed -n '/^validate_desktop_shortcuts()/,/^}/p' \
+    "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_copyq_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_theme_defaults()/,/^}/p' \
@@ -866,6 +870,11 @@ expect_failure "Cinnamon defaults reject the original left-side applet positions
 incomplete_panel_defaults=${dconf_defaults/panel1:right:8:sound@cinnamon.org/panel1:right:8:missing@cinnamon.org}
 expect_failure "Cinnamon defaults require every preserved Mint status applet" \
     validate_cinnamon_panel_defaults "$incomplete_panel_defaults"
+expect_success "Cinnamon defaults enable Computer, Home, Trash, and mounted drives" \
+    validate_cinnamon_desktop_defaults "$dconf_defaults"
+missing_desktop_icon=${dconf_defaults/home-icon-visible=true/home-icon-visible=false}
+expect_failure "Cinnamon defaults reject a disabled desktop icon" \
+    validate_cinnamon_desktop_defaults "$missing_desktop_icon"
 expect_success "Cinnamon defaults bind Super+V to the CopyQ history toggle" \
     validate_cinnamon_copyq_defaults "$dconf_defaults"
 invalid_copyq_defaults=${dconf_defaults//<Super>v/<Super>x}
@@ -892,11 +901,86 @@ window_theme_defaults=$dconf_defaults$'\n[org/cinnamon/desktop/wm/preferences]\n
 expect_failure "Cinnamon theme defaults reject an accompanying window-border change" \
     validate_cinnamon_theme_defaults "$window_theme_defaults"
 
+grouped_launcher_fixture="$safe_root/grouped-window-list.json"
+panel_launcher_fixture="$safe_root/panel-launchers.json"
+taskbar_launchers=()
+eval "$(sed -n '/^taskbar_launchers=(/,/^)/p' \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+if [[ "${taskbar_launchers[*]}" == \
+    "nemo.desktop google-chrome.desktop onlyoffice-desktopeditors.desktop mintinstall.desktop cinnamon-settings.desktop org.gnome.SystemMonitor.desktop" ]]; then
+    pass "Branding hook defines the requested taskbar launcher order"
+else
+    fail "Branding hook defines the requested taskbar launcher order"
+fi
+cat >"$grouped_launcher_fixture" <<'EOF'
+{"pinned-apps":{"default":["nemo.desktop","google-chrome.desktop","onlyoffice-desktopeditors.desktop","mintinstall.desktop","cinnamon-settings.desktop","org.gnome.SystemMonitor.desktop"]}}
+EOF
+cat >"$panel_launcher_fixture" <<'EOF'
+{"launcherList":{"default":["nemo.desktop","google-chrome.desktop","onlyoffice-desktopeditors.desktop","mintinstall.desktop","cinnamon-settings.desktop","org.gnome.SystemMonitor.desktop"]}}
+EOF
+expect_success "Cinnamon taskbar defaults preserve the requested launcher order" \
+    validate_cinnamon_launcher_defaults "$(cat "$grouped_launcher_fixture")" \
+    "$(cat "$panel_launcher_fixture")"
+reordered_grouped=$(sed \
+    's/"nemo.desktop","google-chrome.desktop"/"google-chrome.desktop","nemo.desktop"/' \
+    "$grouped_launcher_fixture")
+expect_failure "Cinnamon taskbar defaults reject reordered launchers" \
+    validate_cinnamon_launcher_defaults "$reordered_grouped" \
+    "$(cat "$panel_launcher_fixture")"
+incomplete_panel_launchers=$(sed 's/,"org.gnome.SystemMonitor.desktop"//' \
+    "$panel_launcher_fixture")
+expect_failure "Cinnamon taskbar defaults require every requested launcher" \
+    validate_cinnamon_launcher_defaults "$(cat "$grouped_launcher_fixture")" \
+    "$incomplete_panel_launchers"
+
+eval "$(sed -n '/^install_desktop_shortcuts()/,/^}/p' \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+desktop_shortcuts=()
+eval "$(sed -n '/^desktop_shortcuts=(/,/^)/p' \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+if [[ "${desktop_shortcuts[*]}" == \
+    "google-chrome.desktop onlyoffice-desktopeditors.desktop mintinstall.desktop org.gnome.SystemMonitor.desktop" ]]; then
+    pass "Branding hook defines the requested desktop shortcuts"
+else
+    fail "Branding hook defines the requested desktop shortcuts"
+fi
+shortcut_sources="$safe_root/shortcut-sources"
+shortcut_desktop="$safe_root/shortcut-desktop"
+mkdir -p "$shortcut_sources"
+desktop_shortcut_names=(
+    google-chrome.desktop
+    onlyoffice-desktopeditors.desktop
+    mintinstall.desktop
+    org.gnome.SystemMonitor.desktop
+)
+for desktop_shortcut in "${desktop_shortcut_names[@]}"; do
+    printf '[Desktop Entry]\nName=%s\n' "$desktop_shortcut" \
+        >"$shortcut_sources/$desktop_shortcut"
+done
+expect_success "Desktop shortcut installer copies every requested application" \
+    install_desktop_shortcuts "$shortcut_sources" "$shortcut_desktop" \
+    "${desktop_shortcut_names[@]}"
+expect_success "Default desktop shortcuts are executable and match their sources" \
+    validate_desktop_shortcuts "$shortcut_desktop" "$shortcut_sources"
+touch "$shortcut_desktop/ubiquity.desktop"
+expect_failure "Default desktop shortcuts exclude the live installer" \
+    validate_desktop_shortcuts "$shortcut_desktop" "$shortcut_sources"
+rm -f -- "$shortcut_desktop/ubiquity.desktop" "$shortcut_sources/mintinstall.desktop"
+expect_failure "Desktop shortcut installation rejects a missing application source" \
+    install_desktop_shortcuts "$shortcut_sources" "$shortcut_desktop" mintinstall.desktop
+
 if ! rg -n '/org/cinnamon/desktop/interface/(gtk|cursor)-theme|/org/x/apps/portal/color-scheme' \
     "$PROJECT_ROOT/config" >/dev/null; then
     pass "Cinnamon theme defaults are not locked"
 else
     fail "Cinnamon theme defaults are not locked"
+fi
+
+if ! rg -n '/org/nemo/desktop/(computer-icon-visible|home-icon-visible|trash-icon-visible|volumes-visible)' \
+    "$PROJECT_ROOT/config" >/dev/null; then
+    pass "Cinnamon desktop icon defaults are not locked"
+else
+    fail "Cinnamon desktop icon defaults are not locked"
 fi
 
 if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then
