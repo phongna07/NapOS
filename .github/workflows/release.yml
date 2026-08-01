@@ -1,0 +1,80 @@
+name: Build release ISO
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: napos-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Require the main branch
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "Release builds must be dispatched from main, not $GITHUB_REF" >&2
+            exit 1
+          }
+
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Read build configuration
+        id: build-config
+        shell: bash
+        run: |
+          source remix.conf
+          source config/source.lock
+          {
+            echo "version=$NAPOS_VERSION"
+            echo "artifact_base=NapOS-$NAPOS_VERSION-$NAPOS_EDITION-$NAPOS_ARCH"
+            echo "base_sha256=$BASE_ISO_SHA256"
+            echo "mint_fingerprint=$MINT_SIGNING_FINGERPRINT"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Run non-networked tests
+        run: make test
+
+      - name: Reclaim hosted-runner disk space
+        run: tools/ci/reclaim-github-disk.sh
+
+      - name: Install ISO build tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            curl file gnupg jq make rsync shellcheck squashfs-tools xorriso
+          sudo apt-get clean
+
+      - name: Restore authenticated Mint input cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            cache/downloads/${{ steps.build-config.outputs.base_sha256 }}
+            cache/gnupg
+          key: >-
+            napos-mint-ubuntu-24.04-${{ steps.build-config.outputs.base_sha256 }}-${{ steps.build-config.outputs.mint_fingerprint }}
+
+      - name: Build and verify release ISO
+        run: make release
+
+      - name: Upload verified release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: NapOS-${{ steps.build-config.outputs.version }}-release-${{ github.run_number }}
+          path: |
+            dist/${{ steps.build-config.outputs.artifact_base }}.iso
+            dist/${{ steps.build-config.outputs.artifact_base }}.iso.sha256
+            dist/${{ steps.build-config.outputs.artifact_base }}.build-info.json
+            dist/build-release.log
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1

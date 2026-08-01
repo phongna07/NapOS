@@ -62,7 +62,7 @@ trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 
 usage() {
-    cat <<'EOF'
+    cat <<EOF
 NapOS automated Linux Mint ISO-remaster workflow
 
 Usage:
@@ -77,7 +77,7 @@ Usage:
   tools/napos-build clean-cache
 
 Preferred interface:
-  make doctor   Validate WSL2, tools, storage, sudo, and mounts
+  make doctor   Validate WSL2/GitHub Ubuntu, tools, storage, sudo, and mounts
   make fetch    Authenticate and cache Linux Mint, Chrome, and ONLYOFFICE
   make dev      Build and verify an LZ4 development ISO
   make release  Build and verify an XZ release ISO
@@ -86,13 +86,13 @@ Preferred interface:
   make test     Run non-networked safety and branding checks
 
 Generated files are written below dist/. Builds are not byte-reproducible
-because package versions are resolved from live Mint, Ubuntu, and Google
-repositories.
+because package versions are resolved from live Mint, Ubuntu, Google, and
+ONLYOFFICE repositories.
 
 Development artifacts:
-  dist/NapOS-0.1.0-dev-cinnamon-amd64.iso
-  dist/NapOS-0.1.0-dev-cinnamon-amd64.iso.sha256
-  dist/NapOS-0.1.0-dev-cinnamon-amd64.build-info.json
+  dist/NapOS-${NAPOS_VERSION}-dev-${NAPOS_EDITION}-${NAPOS_ARCH}.iso
+  dist/NapOS-${NAPOS_VERSION}-dev-${NAPOS_EDITION}-${NAPOS_ARCH}.iso.sha256
+  dist/NapOS-${NAPOS_VERSION}-dev-${NAPOS_EDITION}-${NAPOS_ARCH}.build-info.json
   dist/build-dev.log
 
 Release artifacts use the same names without the -dev suffix.
@@ -156,6 +156,20 @@ check_wsl2() {
     grep -qi 'microsoft-standard-WSL2' /proc/sys/kernel/osrelease
 }
 
+check_github_actions_ubuntu() {
+    (
+        is_github_actions || return 1
+        [[ -r /etc/os-release ]] || return 1
+        # shellcheck source=/dev/null
+        source /etc/os-release
+        [[ "${ID:-}" == "ubuntu" ]]
+    )
+}
+
+check_supported_build_host() {
+    check_wsl2 || check_github_actions_ubuntu
+}
+
 check_native_filesystem() {
     local type
     [[ "$PROJECT_ROOT" != /mnt/* ]] || return 1
@@ -203,7 +217,7 @@ check_mount_capability() {
 cmd_doctor() {
     validate_config
     log "Environment doctor"
-    doctor_check "WSL2 kernel detected" check_wsl2
+    doctor_check "WSL2 or GitHub-hosted Ubuntu detected" check_supported_build_host
     doctor_check "Project uses the native Linux filesystem" check_native_filesystem
     doctor_check "At least ${MIN_FREE_GIB} GiB is available" check_disk_space
     doctor_check "All required commands are installed" check_tools
@@ -220,6 +234,14 @@ cmd_doctor() {
         die "Environment doctor found $DOCTOR_FAILURES failed requirement(s)."
     fi
     ok "Configuration is valid: $NAPOS_NAME $NAPOS_VERSION on Mint $BASE_VERSION"
+}
+
+log_disk_usage() {
+    local stage=$1
+    local available used
+    available=$(df -Ph "$PROJECT_ROOT" | awk 'NR == 2 { print $4 }')
+    used=$(df -Ph "$PROJECT_ROOT" | awk 'NR == 2 { print $3 }')
+    log "Disk usage after $stage: $used used, $available available"
 }
 run_external() {
     local status=0
@@ -644,6 +666,45 @@ prepare_work_tree() {
     ok "Fresh work tree is ready."
 }
 
+prepare_github_work_tree() {
+    local base_iso boot_report
+    base_iso=$(base_iso_path)
+    mkdir -p "$WORK_DIR" "$DIST_DIR"
+    cleanup_mounts "$ROOTFS"
+    safe_remove_tree "$ISO_TREE" "$WORK_DIR"
+    safe_remove_tree "$ROOTFS" "$WORK_DIR"
+    safe_remove_tree "$META_DIR" "$WORK_DIR"
+    mkdir -p "$ISO_TREE" "$META_DIR"
+
+    log "Extracting the authenticated ISO directly into the GitHub Actions work tree..."
+    xorriso -osirrox on -indev "$base_iso" -extract / "$ISO_TREE"
+    [[ -f "$ISO_TREE/casper/filesystem.squashfs" ]] || die "Base ISO has no Casper SquashFS."
+
+    log "Expanding the base SquashFS directly into the GitHub Actions rootfs..."
+    sudo unsquashfs -no-progress -d "$ROOTFS" "$ISO_TREE/casper/filesystem.squashfs"
+    validate_extracted_base "$WORK_DIR" ||
+        die "Extracted ISO, boot files, installer, or rootfs are incomplete."
+
+    boot_report=$(xorriso -indev "$base_iso" -report_el_torito plain 2>&1)
+    grep -q 'BIOS' <<<"$boot_report" || die "Base ISO has no legacy BIOS boot entry."
+    grep -Eq 'UEFI|EFI' <<<"$boot_report" || die "Base ISO has no EFI boot entry."
+
+    sudo mkdir -p "$BASE_REFERENCE_DIR/etc"
+    sudo cp -a "$ROOTFS/etc/lsb-release" "$BASE_REFERENCE_DIR/etc/lsb-release"
+    sudo cp -a "$ROOTFS/etc/apt" "$BASE_REFERENCE_DIR/etc/apt"
+    sudo rm -f -- "$ISO_TREE/casper/filesystem.squashfs"
+    printf 'sha256=%s\n' "$BASE_ISO_SHA256" >"$META_DIR/source"
+    ok "GitHub Actions work tree created without a duplicate expanded base cache."
+}
+
+base_reference_root() {
+    if check_github_actions_ubuntu; then
+        printf '%s\n' "$BASE_REFERENCE_DIR"
+    else
+        printf '%s\n' "$BASE_CACHE_DIR/rootfs"
+    fi
+}
+
 save_and_enable_dns() {
     if [[ -e "$ROOTFS/etc/resolv.conf" || -L "$ROOTFS/etc/resolv.conf" ]]; then
         sudo cp -a "$ROOTFS/etc/resolv.conf" "$META_DIR/resolv.conf.original"
@@ -719,24 +780,28 @@ install_packages_and_hooks() {
 }
 
 validate_customized_rootfs() {
-    local package chrome_key_fingerprint chrome_source dconf_data
+    local package chrome_key_fingerprint chrome_source dconf_data base_reference
     local packages=(vlc flameshot git curl htop vim)
     local remove_packages=()
     mapfile -t remove_packages < <(
         sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$CONFIG_DIR/packages-remove.txt"
     )
-    sudo chroot "$ROOTFS" /bin/bash -euc '
+    sudo chroot "$ROOTFS" /usr/bin/env -i \
+        HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        NAPOS_VERSION="$NAPOS_VERSION" BASE_VERSION="$BASE_VERSION" \
+        BASE_CODENAME="$BASE_CODENAME" EXPECTED_UBUNTU_CODENAME="$UBUNTU_CODENAME" \
+        DEFAULT_TIMEZONE="$DEFAULT_TIMEZONE" /bin/bash -euc '
         source /usr/lib/os-release
         [[ "$NAME" == "NapOS" ]]
-        [[ "$PRETTY_NAME" == "NapOS 0.1.0" ]]
+        [[ "$PRETTY_NAME" == "NapOS $NAPOS_VERSION" ]]
         [[ "$ID" == "linuxmint" ]]
-        [[ "$VERSION_ID" == "22.3" ]]
-        [[ "$VERSION_CODENAME" == "zena" ]]
-        [[ "$UBUNTU_CODENAME" == "noble" ]]
+        [[ "$VERSION_ID" == "$BASE_VERSION" ]]
+        [[ "$VERSION_CODENAME" == "$BASE_CODENAME" ]]
+        [[ "$UBUNTU_CODENAME" == "$EXPECTED_UBUNTU_CODENAME" ]]
         [[ "$VARIANT" == "NapOS" ]]
         [[ "$VARIANT_ID" == "napos" ]]
         [[ -f /etc/napos-release ]]
-        [[ "$(cat /etc/timezone)" == "Asia/Bangkok" ]]
+        [[ "$(cat /etc/timezone)" == "$DEFAULT_TIMEZONE" ]]
         grep -qx "LANG=en_US.UTF-8" /etc/default/locale
         [[ -f /usr/share/backgrounds/napos/napos-wallpaper.svg ]]
         [[ -f /usr/share/icons/hicolor/scalable/apps/napos-logo.svg ]]
@@ -812,10 +877,11 @@ validate_customized_rootfs() {
     dconf_data=$(sudo cat "$ROOTFS/etc/dconf/db/local.d/00-napos")
     validate_cinnamon_panel_defaults "$dconf_data" ||
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
-    sudo cmp -s "$ROOTFS/etc/lsb-release" "$BASE_CACHE_DIR/rootfs/etc/lsb-release" ||
+    base_reference=$(base_reference_root)
+    sudo cmp -s "$ROOTFS/etc/lsb-release" "$base_reference/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
     sudo diff -qr --exclude=google-chrome.sources \
-        "$ROOTFS/etc/apt" "$BASE_CACHE_DIR/rootfs/etc/apt" >/dev/null ||
+        "$ROOTFS/etc/apt" "$base_reference/etc/apt" >/dev/null ||
         die "Mint APT configuration changed outside the approved Google Chrome source."
     chrome_source="$ROOTFS/etc/apt/sources.list.d/google-chrome.sources"
     [[ -f "$chrome_source" ]] || die "Google Chrome APT source is missing."
@@ -894,6 +960,24 @@ build_squashfs() {
     sudo mksquashfs "$ROOTFS" "$ISO_TREE/casper/filesystem.squashfs" "${options[@]}"
     sudo chmod 0644 "$ISO_TREE/casper/filesystem.squashfs"
     write_installer_manifest
+}
+
+release_github_rootfs() {
+    check_github_actions_ubuntu || return 0
+    cleanup_mounts "$ROOTFS"
+    require_clean_mount_state "$ROOTFS"
+    safe_remove_tree "$ROOTFS" "$WORK_DIR"
+    ok "Released the expanded GitHub Actions rootfs after packing."
+}
+
+release_github_intermediates() {
+    check_github_actions_ubuntu || return 0
+    safe_remove_tree "$ISO_TREE" "$WORK_DIR"
+    for path in "$CHROME_DOWNLOAD_DIR" "$ONLYOFFICE_DOWNLOAD_DIR"; do
+        [[ -e "$path" ]] || continue
+        safe_remove_tree "$path" "$CACHE_DIR"
+    done
+    ok "Released GitHub Actions ISO-tree and volatile package downloads before verification."
 }
 
 write_iso_md5s() {
@@ -1199,12 +1283,12 @@ cmd_verify() {
     done
 
     grep -qx 'NAPOS_NAME="NapOS"' <<<"$napos_release" || die "Embedded NapOS identity is incorrect."
-    grep -qx 'NAPOS_VERSION="0.1.0"' <<<"$napos_release" || die "Embedded NapOS version is incorrect."
+    grep -qx "NAPOS_VERSION=\"$NAPOS_VERSION\"" <<<"$napos_release" || die "Embedded NapOS version is incorrect."
     grep -qx 'NAME="NapOS"' <<<"$os_release" || die "os-release NAME is incorrect."
-    grep -qx 'PRETTY_NAME="NapOS 0.1.0"' <<<"$os_release" || die "os-release PRETTY_NAME is incorrect."
+    grep -qx "PRETTY_NAME=\"NapOS $NAPOS_VERSION\"" <<<"$os_release" || die "os-release PRETTY_NAME is incorrect."
     grep -qx 'ID=linuxmint' <<<"$os_release" || die "Mint technical ID was not preserved."
-    grep -qx 'VERSION_CODENAME=zena' <<<"$os_release" || die "Mint codename was not preserved."
-    grep -qx 'UBUNTU_CODENAME=noble' <<<"$os_release" || die "Ubuntu codename was not preserved."
+    grep -qx "VERSION_CODENAME=$BASE_CODENAME" <<<"$os_release" || die "Mint codename was not preserved."
+    grep -qx "UBUNTU_CODENAME=$UBUNTU_CODENAME" <<<"$os_release" || die "Ubuntu codename was not preserved."
     [[ "$timezone" == "$DEFAULT_TIMEZONE" ]] || die "Unexpected timezone: $timezone"
     grep -qx 'LANG=en_US.UTF-8' <<<"$locale_data" || die "Default locale is not en_US.UTF-8."
     grep -q 'napos-wallpaper.svg' <<<"$dconf_data" || die "NapOS wallpaper dconf default is missing."
@@ -1340,18 +1424,29 @@ cmd_build() {
     ACTIVE_BUILD=1
 
     cmd_fetch
+    log_disk_usage "authenticated input fetch"
     BUILD_ID=$(build_id)
     export BUILD_PROFILE BUILD_ID BUILD_TIMESTAMP
     log "Starting NapOS $NAPOS_VERSION $profile build (build ID $BUILD_ID)"
-    prepare_base_cache
-    prepare_work_tree
+    if check_github_actions_ubuntu; then
+        prepare_github_work_tree
+    else
+        prepare_base_cache
+        prepare_work_tree
+    fi
+    log_disk_usage "base extraction"
     install_packages_and_hooks
     validate_customized_rootfs
+    log_disk_usage "customization"
     clean_chroot
     build_squashfs "$profile"
     write_iso_md5s
+    log_disk_usage "SquashFS packing"
+    release_github_rootfs
     repack_iso "$profile"
     output=$BUILT_ISO
+    log_disk_usage "ISO repacking"
+    release_github_intermediates
     cmd_verify "$output"
     ACTIVE_BUILD=0
     ok "Build complete: $output"

@@ -20,6 +20,7 @@ WORK_DIR="$PROJECT_ROOT/work"
 ISO_TREE="$WORK_DIR/iso-tree"
 ROOTFS="$WORK_DIR/rootfs"
 META_DIR="$WORK_DIR/meta"
+BASE_REFERENCE_DIR="$META_DIR/base-reference"
 DIST_DIR="$PROJECT_ROOT/dist"
 CONFIG_DIR="$PROJECT_ROOT/config"
 
@@ -27,7 +28,7 @@ CONFIG_DIR="$PROJECT_ROOT/config"
 # shellcheck disable=SC2034
 readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR CHROME_DOWNLOAD_DIR ONLYOFFICE_DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
 # shellcheck disable=SC2034
-readonly ISO_TREE ROOTFS META_DIR DIST_DIR CONFIG_DIR
+readonly ISO_TREE ROOTFS META_DIR BASE_REFERENCE_DIR DIST_DIR CONFIG_DIR
 
 if [[ -t 1 ]]; then
     COLOR_RED=$'\033[31m'
@@ -47,6 +48,10 @@ log() { printf '%s[NapOS]%s %s\n' "$COLOR_BLUE" "$COLOR_RESET" "$*"; }
 ok() { printf '%s[  OK  ]%s %s\n' "$COLOR_GREEN" "$COLOR_RESET" "$*"; }
 warn() { printf '%s[ WARN ]%s %s\n' "$COLOR_YELLOW" "$COLOR_RESET" "$*" >&2; }
 die() { printf '%s[ERROR ]%s %s\n' "$COLOR_RED" "$COLOR_RESET" "$*" >&2; exit 1; }
+
+is_github_actions() {
+    [[ "${GITHUB_ACTIONS:-false}" == "true" ]]
+}
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"

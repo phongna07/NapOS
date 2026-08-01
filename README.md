@@ -37,12 +37,44 @@ For the smaller release image:
 make release
 ```
 
+Both commands keep the cached WSL2 workflow: the authenticated base is expanded
+once below `cache/`, then copied into a fresh work tree for each local build.
+
+## GitHub Actions
+
+Pull requests and pushes to `main` run the non-networked `make test` suite on a
+standard `ubuntu-24.04` runner. They do not build an ISO.
+
+Release ISOs are built only when the **Build release ISO** workflow is started
+manually from the Actions page. Select the `main` branch and choose **Run
+workflow**. The workflow refuses other branches, reclaims unused hosted-runner
+SDK space, builds the XZ release with `make release`, performs the normal ISO
+verification, and uploads these files as one workflow artifact:
+
+```text
+NapOS-<version>-cinnamon-amd64.iso
+NapOS-<version>-cinnamon-amd64.iso.sha256
+NapOS-<version>-cinnamon-amd64.build-info.json
+build-release.log
+```
+
+The artifact is retained for one day to limit storage usage on GitHub Free, so
+download it promptly and verify it with `sha256sum -c`. The workflow cache holds
+only the pinned Mint ISO and its isolated GPG state. Chrome and ONLYOFFICE are
+resolved and authenticated from current signed repository metadata on every
+release; expanded root filesystems and disposable work trees are never cached.
+
+GitHub builds use a storage-efficient work path that expands the base directly
+into `work/` and releases large intermediate trees as soon as they are no longer
+needed. This behavior is selected only when `GITHUB_ACTIONS=true`; local WSL2
+commands and their reusable base cache are unchanged.
+
 ## Commands
 
 | Command | Result and verification |
 | --- | --- |
 | `make help` | Prints the supported interface without network or root access. |
-| `make doctor` | Checks WSL2, native storage, 30 GiB free space, tools, sudo, and temporary mount capability. |
+| `make doctor` | Checks WSL2 or GitHub-hosted Ubuntu, native storage, 30 GiB free space, tools, sudo, and temporary mount capability. |
 | `make fetch` | Authenticates and caches the Mint ISO plus the latest Chrome and ONLYOFFICE amd64 `.deb` files selected through signed repository metadata. |
 | `make dev` | Fetches current authenticated inputs, then builds and verifies a fresh LZ4 ISO. |
 | `make release` | Fetches current authenticated inputs, then builds and verifies a fresh XZ ISO. |

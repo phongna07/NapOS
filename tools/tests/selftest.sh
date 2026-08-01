@@ -28,13 +28,17 @@ expect_failure() {
 validate_config
 pass "Configuration validates with exact NapOS identity"
 
-mapfile -t scripts < <(find "$PROJECT_ROOT/tools" "$PROJECT_ROOT/config/hooks" -type f -name '*.sh' -o -path "$PROJECT_ROOT/tools/napos-build" | sort)
+mapfile -t scripts < <(
+    find "$PROJECT_ROOT/tools" "$PROJECT_ROOT/config/hooks" -type f \
+        \( -name '*.sh' -o -path "$PROJECT_ROOT/tools/napos-build" \) | sort
+)
 for script in "${scripts[@]}"; do
     expect_success "Bash syntax: ${script#"$PROJECT_ROOT/"}" bash -n "$script"
 done
 
 if shellcheck -x "$PROJECT_ROOT/tools/napos-build" "$PROJECT_ROOT/tools/lib/common.sh" \
-    "$PROJECT_ROOT/tools/tests/selftest.sh" "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+    "$PROJECT_ROOT/tools/tests/selftest.sh" "$PROJECT_ROOT/tools/ci/reclaim-github-disk.sh" \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
     pass "ShellCheck"
 else
     fail "ShellCheck"
@@ -89,6 +93,64 @@ invalid_onlyoffice_fingerprint_config() (
     validate_config 2>/dev/null
 )
 expect_failure "Invalid ONLYOFFICE signing fingerprint is rejected" invalid_onlyoffice_fingerprint_config
+
+alternate_version_config() (
+    # shellcheck disable=SC2030
+    NAPOS_VERSION=9.8.7
+    # shellcheck disable=SC2030
+    ISO_VOLUME_ID="NAPOS_${NAPOS_VERSION//./_}"
+    validate_config 2>/dev/null
+)
+expect_success "Configuration supports a version change without duplicated identity" alternate_version_config
+
+# shellcheck disable=SC2031
+if [[ "$ISO_VOLUME_ID" == "NAPOS_${NAPOS_VERSION//./_}" ]]; then
+    pass "ISO volume ID is derived from the authoritative NapOS version"
+else
+    fail "ISO volume ID is derived from the authoritative NapOS version"
+fi
+
+eval "$(sed -n '/^check_wsl2()/,/^check_native_filesystem()/p' \
+    "$PROJECT_ROOT/tools/napos-build" | sed '$d')"
+
+supported_wsl_host_fixture() (
+    # shellcheck disable=SC2317
+    check_wsl2() { return 0; }
+    # shellcheck disable=SC2317
+    check_github_actions_ubuntu() { return 1; }
+    check_supported_build_host
+)
+expect_success "Supported-host policy accepts WSL2" supported_wsl_host_fixture
+
+supported_github_host_fixture() (
+    # shellcheck disable=SC2317
+    check_wsl2() { return 1; }
+    # shellcheck disable=SC2317
+    check_github_actions_ubuntu() { return 0; }
+    check_supported_build_host
+)
+expect_success "Supported-host policy accepts GitHub-hosted Ubuntu" supported_github_host_fixture
+
+unsupported_host_fixture() (
+    # shellcheck disable=SC2317
+    check_wsl2() { return 1; }
+    # shellcheck disable=SC2317
+    check_github_actions_ubuntu() { return 1; }
+    check_supported_build_host
+)
+expect_failure "Supported-host policy rejects other hosts" unsupported_host_fixture
+
+cleanup_outside_github() {
+    env -u GITHUB_ACTIONS -u RUNNER_ENVIRONMENT \
+        bash "$PROJECT_ROOT/tools/ci/reclaim-github-disk.sh" >/dev/null 2>&1
+}
+expect_failure "Runner cleanup refuses non-GitHub environments" cleanup_outside_github
+
+cleanup_on_self_hosted_runner() {
+    GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=self-hosted \
+        bash "$PROJECT_ROOT/tools/ci/reclaim-github-disk.sh" >/dev/null 2>&1
+}
+expect_failure "Runner cleanup refuses self-hosted environments" cleanup_on_self_hosted_runner
 
 # shellcheck disable=SC2031
 if [[ "$MINT_SIGNING_FINGERPRINT" == "27DEB15644C6B3CF3BD7D291300F846BA25BAE09" ]]; then
@@ -465,10 +527,19 @@ else
     pass "Branding capitalization is exact"
 fi
 
-if grep -q '>NapOS<' "$PROJECT_ROOT/config/overlay/usr/share/backgrounds/napos/napos-wallpaper.svg"; then
-    pass "Wallpaper contains the NapOS wordmark"
+wallpaper="$PROJECT_ROOT/config/overlay/usr/share/backgrounds/napos/napos-wallpaper.svg"
+if [[ -s "$wallpaper" ]] &&
+    grep -Fq '<svg xmlns="http://www.w3.org/2000/svg"' "$wallpaper" &&
+    grep -Fq 'width="3840" height="2160"' "$wallpaper"; then
+    pass "Wallpaper is a non-empty 4K SVG asset"
 else
-    fail "Wallpaper contains the NapOS wordmark"
+    fail "Wallpaper is a non-empty 4K SVG asset"
+fi
+
+if rg -n --fixed-strings '0.1.0' "$PROJECT_ROOT/tools/napos-build" >/dev/null; then
+    fail "Build implementation avoids a hard-coded NapOS release version"
+else
+    pass "Build implementation avoids a hard-coded NapOS release version"
 fi
 
 for target in help doctor fetch dev release verify inspect test clean-work clean-cache; do
@@ -488,6 +559,47 @@ if sed -n '/^write_iso_md5s()/,/^}/p' "$PROJECT_ROOT/tools/napos-build" |
     pass "Read-only ISO checksum manifest is replaced non-interactively"
 else
     fail "Read-only ISO checksum manifest is replaced non-interactively"
+fi
+
+github_prepare=$(sed -n '/^prepare_github_work_tree()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+# shellcheck disable=SC2016
+if grep -Fq 'xorriso -osirrox on -indev "$base_iso" -extract / "$ISO_TREE"' \
+    <<<"$github_prepare" &&
+    grep -Fq 'sudo unsquashfs -no-progress -d "$ROOTFS"' <<<"$github_prepare" &&
+    ! grep -Fq 'BASE_CACHE_DIR' <<<"$github_prepare" &&
+    ! grep -Fq 'rsync' <<<"$github_prepare"; then
+    pass "GitHub preparation avoids a duplicate expanded base cache"
+else
+    fail "GitHub preparation avoids a duplicate expanded base cache"
+fi
+
+ci_workflow="$PROJECT_ROOT/.github/workflows/ci.yml"
+release_workflow="$PROJECT_ROOT/.github/workflows/release.yml"
+if grep -Fq 'pull_request:' "$ci_workflow" && grep -Fq 'push:' "$ci_workflow" &&
+    grep -Fq 'run: make test' "$ci_workflow"; then
+    pass "CI workflow tests pull requests and main pushes"
+else
+    fail "CI workflow tests pull requests and main pushes"
+fi
+
+if grep -Fq 'workflow_dispatch:' "$release_workflow" &&
+    ! grep -Fq 'pull_request:' "$release_workflow" && ! grep -Fq 'push:' "$release_workflow" &&
+    grep -Fq 'refs/heads/main' "$release_workflow" &&
+    grep -Fq 'run: make release' "$release_workflow"; then
+    pass "Release workflow is manual, main-only, and uses the release build"
+else
+    fail "Release workflow is manual, main-only, and uses the release build"
+fi
+
+# shellcheck disable=SC2016
+if grep -Fq 'compression-level: 0' "$release_workflow" &&
+    grep -Fq 'retention-days: 1' "$release_workflow" &&
+    grep -Fq 'cache/downloads/${{ steps.build-config.outputs.base_sha256 }}' "$release_workflow" &&
+    grep -Fq 'cache/gnupg' "$release_workflow" &&
+    ! grep -Eq 'uses: [^ ]+@v[0-9]' "$ci_workflow" "$release_workflow"; then
+    pass "Release artifact and cache policies are bounded and actions are SHA-pinned"
+else
+    fail "Release artifact and cache policies are bounded and actions are SHA-pinned"
 fi
 
 if (( failures > 0 )); then

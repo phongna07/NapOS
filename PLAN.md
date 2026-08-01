@@ -1,4 +1,4 @@
-- [ ] github action
+- [x] github action
 - [ ] versioning and branching
 - [x] Change background
 - [ ] Change logo
