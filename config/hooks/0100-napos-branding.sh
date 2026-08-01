@@ -109,6 +109,22 @@ grep -qx 'Exec=copyq' /etc/xdg/autostart/com.github.hluk.copyq.desktop || {
 }
 chmod 0644 /etc/xdg/autostart/com.github.hluk.copyq.desktop
 
+printf '[NapOS] Configuring Flameshot screenshot tool...\n'
+flameshot_desktop=/usr/share/applications/org.flameshot.Flameshot.desktop
+[[ -f "$flameshot_desktop" ]] || {
+    printf 'Required Flameshot desktop launcher is missing: %s\n' "$flameshot_desktop" >&2
+    exit 1
+}
+mkdir -p /etc/xdg/autostart
+cp "$flameshot_desktop" /etc/xdg/autostart/org.flameshot.Flameshot.desktop
+sed -i '0,/^Exec=.*/s|^Exec=.*|Exec=flameshot|' \
+    /etc/xdg/autostart/org.flameshot.Flameshot.desktop
+grep -qx 'Exec=flameshot' /etc/xdg/autostart/org.flameshot.Flameshot.desktop || {
+    printf 'Failed to configure Flameshot autostart.\n' >&2
+    exit 1
+}
+chmod 0644 /etc/xdg/autostart/org.flameshot.Flameshot.desktop
+
 printf '[NapOS] Configuring Fcitx5 Lotus defaults...\n'
 chmod 0755 /usr/libexec/napos-fcitx5-lotus-user
 for variable in XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE; do

@@ -75,6 +75,8 @@ Verification requires:
   defaults, with the remaining Mint panel applets preserved.
 - CopyQ installed with a system-wide hidden autostart entry and a user-overridable
   Cinnamon `Super+V` shortcut that runs `copyq toggle`.
+- Flameshot installed with a system-wide, user-overridable autostart entry that
+  launches its tray application at desktop login.
 - The authenticated `Windows-10-Dark` theme payload installed system-wide and
   selected for Cinnamon's Applications theme, with the Yaru mouse pointer and
   dark mode selected by default. These defaults remain user-overridable, and

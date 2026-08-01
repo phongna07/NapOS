@@ -1114,6 +1114,10 @@ validate_customized_rootfs() {
         [[ -f /usr/share/applications/com.github.hluk.copyq.desktop ]]
         [[ -f /etc/xdg/autostart/com.github.hluk.copyq.desktop ]]
         grep -qx "Exec=copyq" /etc/xdg/autostart/com.github.hluk.copyq.desktop
+        [[ -x /usr/bin/flameshot ]]
+        [[ -f /usr/share/applications/org.flameshot.Flameshot.desktop ]]
+        [[ -f /etc/xdg/autostart/org.flameshot.Flameshot.desktop ]]
+        grep -qx "Exec=flameshot" /etc/xdg/autostart/org.flameshot.Flameshot.desktop
         [[ -x /usr/bin/onlyoffice-desktopeditors ]]
         [[ -f /usr/share/applications/onlyoffice-desktopeditors.desktop ]]
         for font in \
@@ -1533,7 +1537,8 @@ cmd_verify() {
     local onlyoffice_version onlyoffice_launcher office_mime
     local lotus_source_file lotus_key_file lotus_key_fingerprint lotus_version
     local fcitx_environment fcitx_profile fcitx_config lotus_user_unit lotus_server_unit
-    local copyq_autostart mimeapps mint_mimeapps grouped_window_list panel_launchers theme_index theme_file
+    local copyq_autostart flameshot_autostart mimeapps mint_mimeapps grouped_window_list
+    local panel_launchers theme_index theme_file
     local application_defaults launcher_defaults
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
@@ -1616,6 +1621,15 @@ cmd_verify() {
         die "CopyQ global autostart entry is missing."
     grep -qx 'Exec=copyq' <<<"$copyq_autostart" ||
         die "CopyQ autostart does not start hidden."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/flameshot 2>/dev/null |
+        grep -q 'usr/bin/flameshot' || die "Flameshot executable is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/org.flameshot.Flameshot.desktop \
+        >/dev/null 2>&1 || die "Flameshot desktop launcher is missing."
+    flameshot_autostart=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        etc/xdg/autostart/org.flameshot.Flameshot.desktop 2>/dev/null) ||
+        die "Flameshot global autostart entry is missing."
+    grep -qx 'Exec=flameshot' <<<"$flameshot_autostart" ||
+        die "Flameshot autostart does not start the tray application."
     onlyoffice_launcher=$(unsquashfs -cat "$temp/filesystem.squashfs" \
         usr/share/applications/onlyoffice-desktopeditors.desktop 2>/dev/null) ||
         die "ONLYOFFICE desktop launcher is missing."

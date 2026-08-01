@@ -603,6 +603,15 @@ else
     fail "CopyQ starts hidden for every desktop login"
 fi
 
+if grep -Fq 'flameshot_desktop=/usr/share/applications/org.flameshot.Flameshot.desktop' \
+    "$branding_hook" &&
+    grep -Fq '/etc/xdg/autostart/org.flameshot.Flameshot.desktop' "$branding_hook" &&
+    grep -Fq "sed -i '0,/^Exec=.*/s|^Exec=.*|Exec=flameshot|'" "$branding_hook"; then
+    pass "Flameshot starts for every desktop login"
+else
+    fail "Flameshot starts for every desktop login"
+fi
+
 if grep -Fq 'XMODIFIERS=@im=fcitx' "$branding_hook" &&
     grep -Fq 'GTK_IM_MODULE=fcitx' "$branding_hook" &&
     grep -Fq 'QT_IM_MODULE=fcitx' "$branding_hook" &&
