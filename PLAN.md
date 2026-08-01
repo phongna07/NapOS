@@ -4,7 +4,7 @@
 - [ ] Change logo
 - [ ] Remove firefox
 - [ ] Remove libreoffice
-- [ ] Chrome
+- [x] Chrome
 - [ ] fcitx5-lotus
 - [ ] OBS Studio
 - [ ] OnlyOffice

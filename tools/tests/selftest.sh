@@ -76,11 +76,25 @@ invalid_fingerprint_config() (
 )
 expect_failure "Invalid signing fingerprint is rejected" invalid_fingerprint_config
 
+invalid_google_fingerprint_config() (
+    # shellcheck disable=SC2030
+    local GOOGLE_CHROME_SIGNING_FINGERPRINT=0000
+    validate_config 2>/dev/null
+)
+expect_failure "Invalid Google signing fingerprint is rejected" invalid_google_fingerprint_config
+
 # shellcheck disable=SC2031
 if [[ "$MINT_SIGNING_FINGERPRINT" == "27DEB15644C6B3CF3BD7D291300F846BA25BAE09" ]]; then
     pass "Mint signing fingerprint equals the committed pin"
 else
     fail "Mint signing fingerprint equals the committed pin"
+fi
+
+# shellcheck disable=SC2031
+if [[ "$GOOGLE_CHROME_SIGNING_FINGERPRINT" == "EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796" ]]; then
+    pass "Google signing fingerprint equals the committed pin"
+else
+    fail "Google signing fingerprint equals the committed pin"
 fi
 
 printf 'NapOS checksum fixture\n' >"$safe_root/payload"
@@ -97,6 +111,84 @@ if [[ "$(sha256_of "$safe_root/payload")" != "$expected" ]]; then
 else
     fail "Checksum helper detects tampering"
 fi
+
+printf 'Authenticated Chrome fixture\n' >"$safe_root/chrome.deb"
+chrome_fixture_sha=$(sha256_of "$safe_root/chrome.deb")
+chrome_fixture_size=$(stat -c '%s' "$safe_root/chrome.deb")
+if [[ "${chrome_fixture_sha:0:1}" == 0 ]]; then
+    bad_chrome_fixture_sha="1${chrome_fixture_sha:1}"
+else
+    bad_chrome_fixture_sha="0${chrome_fixture_sha:1}"
+fi
+expect_success "Chrome cache validator accepts intact size and SHA-256" \
+    verify_file_sha256_and_size "$safe_root/chrome.deb" "$chrome_fixture_sha" "$chrome_fixture_size"
+expect_failure "Chrome cache validator rejects an incorrect size" \
+    verify_file_sha256_and_size "$safe_root/chrome.deb" "$chrome_fixture_sha" "$((chrome_fixture_size + 1))"
+expect_failure "Chrome cache validator rejects an incorrect SHA-256" \
+    verify_file_sha256_and_size "$safe_root/chrome.deb" "$bad_chrome_fixture_sha" "$chrome_fixture_size"
+
+cat >"$safe_root/InRelease" <<'EOF'
+Origin: Google LLC
+SHA256:
+ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 321 main/binary-amd64/Packages
+ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 123 main/binary-amd64/Release
+EOF
+release_metadata=$(release_file_metadata "$safe_root/InRelease" 'main/binary-amd64/Packages')
+if [[ "$release_metadata" == $'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t321' ]]; then
+    pass "Signed Release metadata resolves the amd64 Packages index"
+else
+    fail "Signed Release metadata resolves the amd64 Packages index"
+fi
+expect_failure "Signed Release metadata rejects a missing index" \
+    release_file_metadata "$safe_root/InRelease" 'main/binary-arm64/Packages'
+
+cat >"$safe_root/Packages" <<'EOF'
+Package: unrelated-package
+Version: 1.0
+Architecture: amd64
+Filename: pool/main/u/unrelated-package.deb
+Size: 10
+SHA256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+Package: google-chrome-stable
+Version: 151.0.7922.71-1
+Architecture: amd64
+Filename: pool/main/g/google-chrome-stable/google-chrome-stable_151.0.7922.71-1_amd64.deb
+Size: 140000000
+SHA256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+EOF
+package_metadata=$(chrome_package_metadata "$safe_root/Packages")
+expected_metadata=$'151.0.7922.71-1\tpool/main/g/google-chrome-stable/google-chrome-stable_151.0.7922.71-1_amd64.deb\tdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\t140000000'
+if [[ "$package_metadata" == "$expected_metadata" ]]; then
+    pass "Chrome package metadata resolves the stable amd64 package"
+else
+    fail "Chrome package metadata resolves the stable amd64 package"
+fi
+sed 's/Architecture: amd64/Architecture: arm64/g' "$safe_root/Packages" >"$safe_root/Packages-wrong-arch"
+expect_failure "Chrome package metadata rejects the wrong architecture" \
+    chrome_package_metadata "$safe_root/Packages-wrong-arch"
+sed 's/Package: google-chrome-stable/Package: google-chrome-beta/' "$safe_root/Packages" >"$safe_root/Packages-wrong-name"
+expect_failure "Chrome package metadata rejects the wrong package name" \
+    chrome_package_metadata "$safe_root/Packages-wrong-name"
+sed 's/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/not-a-sha256/' \
+    "$safe_root/Packages" >"$safe_root/Packages-bad-sha"
+expect_failure "Chrome package metadata rejects an invalid package SHA-256" \
+    chrome_package_metadata "$safe_root/Packages-bad-sha"
+
+cat >"$safe_root/google-chrome.sources" <<EOF
+Types: deb
+URIs: $GOOGLE_CHROME_INSTALLED_APT_URI
+Suites: stable
+Components: main
+Architectures: $GOOGLE_CHROME_ARCH
+Signed-By: /usr/share/keyrings/google-chrome.gpg
+EOF
+expect_success "Google Chrome APT source policy accepts the official source" \
+    validate_chrome_apt_source "$safe_root/google-chrome.sources"
+sed 's#https://dl.google.com/#https://example.invalid/#' "$safe_root/google-chrome.sources" \
+    >"$safe_root/google-chrome-invalid.sources"
+expect_failure "Google Chrome APT source policy rejects another origin" \
+    validate_chrome_apt_source "$safe_root/google-chrome-invalid.sources"
 
 expected_packages=$'curl\nflameshot\ngit\nhtop\nvim\nvlc'
 actual_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$PROJECT_ROOT/config/packages.txt" | sort)

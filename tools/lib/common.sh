@@ -13,6 +13,7 @@ source "$PROJECT_ROOT/config/source.lock"
 
 CACHE_DIR="$PROJECT_ROOT/cache"
 DOWNLOAD_DIR="$CACHE_DIR/downloads/$BASE_ISO_SHA256"
+CHROME_DOWNLOAD_DIR="$CACHE_DIR/downloads/google-chrome"
 BASE_CACHE_DIR="$CACHE_DIR/base/$BASE_ISO_SHA256"
 WORK_DIR="$PROJECT_ROOT/work"
 ISO_TREE="$WORK_DIR/iso-tree"
@@ -23,7 +24,7 @@ CONFIG_DIR="$PROJECT_ROOT/config"
 
 # These shared readonly values are consumed by scripts that source this library.
 # shellcheck disable=SC2034
-readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
+readonly PROJECT_ROOT CACHE_DIR DOWNLOAD_DIR CHROME_DOWNLOAD_DIR BASE_CACHE_DIR WORK_DIR
 # shellcheck disable=SC2034
 readonly ISO_TREE ROOTFS META_DIR DIST_DIR CONFIG_DIR
 
@@ -62,6 +63,18 @@ validate_config() {
     (( ${#ISO_VOLUME_ID} <= 32 )) || die "ISO_VOLUME_ID exceeds the ISO-9660 32-character limit."
     [[ "$BASE_ISO_SHA256" =~ ^[a-f0-9]{64}$ ]] || die "Invalid pinned base ISO SHA-256."
     [[ "$(trim_fingerprint "$MINT_SIGNING_FINGERPRINT")" =~ ^[A-F0-9]{40}$ ]] || die "Invalid Mint signing fingerprint."
+    [[ "$GOOGLE_CHROME_PACKAGE" == "google-chrome-stable" ]] || die "Unexpected Google Chrome package name."
+    [[ "$GOOGLE_CHROME_ARCH" == "amd64" ]] || die "Google Chrome input must target amd64."
+    [[ "$GOOGLE_CHROME_DEB_URL" == "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" ]] ||
+        die "Unexpected Google Chrome download URL."
+    [[ "$GOOGLE_CHROME_APT_URL" == "https://dl.google.com/linux/chrome/deb" ]] ||
+        die "Unexpected Google Chrome APT metadata URL."
+    [[ "$GOOGLE_CHROME_SIGNING_KEY_URL" == "https://dl.google.com/linux/linux_signing_key.pub" ]] ||
+        die "Unexpected Google Linux signing-key URL."
+    [[ "$(trim_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT")" =~ ^[A-F0-9]{40}$ ]] ||
+        die "Invalid Google Linux signing fingerprint."
+    [[ "$GOOGLE_CHROME_INSTALLED_APT_URI" == "https://dl.google.com/linux/chrome-stable/deb/" ]] ||
+        die "Unexpected installed Google Chrome APT URI."
     [[ -f "$CONFIG_DIR/packages.txt" ]] || die "Missing package list: $CONFIG_DIR/packages.txt"
     [[ -d "$CONFIG_DIR/overlay" ]] || die "Missing overlay directory: $CONFIG_DIR/overlay"
 }
@@ -105,6 +118,76 @@ sha256_of() {
     sha256sum "$1" | awk '{print $1}'
 }
 
+verify_file_sha256_and_size() {
+    local path=$1
+    local expected_sha256=$2
+    local expected_size=$3
+    [[ -f "$path" ]] || return 1
+    [[ "$expected_sha256" =~ ^[a-f0-9]{64}$ ]] || return 1
+    [[ "$expected_size" =~ ^[0-9]+$ ]] || return 1
+    [[ "$(stat -c '%s' "$path")" == "$expected_size" ]] || return 1
+    [[ "$(sha256_of "$path")" == "$expected_sha256" ]]
+}
+
+primary_key_fingerprint() {
+    local key_file=$1
+    gpg --batch --show-keys --with-colons "$key_file" 2>/dev/null |
+        awk -F: '$1 == "pub" { want_fingerprint=1; next }
+            want_fingerprint && $1 == "fpr" { print $10; exit }'
+}
+
+release_file_metadata() {
+    local release_file=$1
+    local wanted_path=$2
+    awk -v wanted="$wanted_path" '
+        $0 == "SHA256:" { in_sha256=1; next }
+        in_sha256 && $0 !~ /^ / { exit }
+        in_sha256 && $3 == wanted { print $1 "\t" $2; found=1; exit }
+        END { if (!found) exit 1 }
+    ' "$release_file"
+}
+
+chrome_package_metadata() {
+    local packages_file=$1
+    awk -v wanted_package="$GOOGLE_CHROME_PACKAGE" -v wanted_arch="$GOOGLE_CHROME_ARCH" '
+        BEGIN { RS=""; FS="\n" }
+        {
+            delete value
+            for (i=1; i<=NF; i++) {
+                separator=index($i, ": ")
+                if (separator > 0) {
+                    key=substr($i, 1, separator-1)
+                    value[key]=substr($i, separator+2)
+                }
+            }
+            if (value["Package"] == wanted_package && value["Architecture"] == wanted_arch) {
+                if (value["Version"] == "" || value["Filename"] == "" ||
+                    value["SHA256"] !~ /^[a-f0-9]{64}$/ || value["Size"] !~ /^[0-9]+$/) {
+                    exit 2
+                }
+                print value["Version"] "\t" value["Filename"] "\t" value["SHA256"] "\t" value["Size"]
+                found=1
+                exit
+            }
+        }
+        END { if (!found) exit 1 }
+    ' "$packages_file"
+}
+
+validate_chrome_apt_source() {
+    local source_file=$1
+    [[ -f "$source_file" ]] || return 1
+    [[ "$(grep -c '^Types:' "$source_file")" == 1 ]] && grep -qx 'Types: deb' "$source_file" || return 1
+    [[ "$(grep -c '^URIs:' "$source_file")" == 1 ]] &&
+        grep -qx "URIs: $GOOGLE_CHROME_INSTALLED_APT_URI" "$source_file" || return 1
+    [[ "$(grep -c '^Suites:' "$source_file")" == 1 ]] && grep -qx 'Suites: stable' "$source_file" || return 1
+    [[ "$(grep -c '^Components:' "$source_file")" == 1 ]] && grep -qx 'Components: main' "$source_file" || return 1
+    [[ "$(grep -c '^Architectures:' "$source_file")" == 1 ]] &&
+        grep -qx "Architectures: $GOOGLE_CHROME_ARCH" "$source_file" || return 1
+    [[ "$(grep -c '^Signed-By:' "$source_file")" == 1 ]] &&
+        grep -qx 'Signed-By: /usr/share/keyrings/google-chrome.gpg' "$source_file"
+}
+
 package_list_hash() {
     sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$CONFIG_DIR/packages.txt" | sort | sha256sum | awk '{print $1}'
 }
@@ -122,7 +205,7 @@ git_dirty() {
 }
 
 build_id() {
-    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(git_revision)" |
+    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|${CHROME_DEB_SHA256:-unresolved}|$(git_revision)" |
         sha256sum | cut -c1-16
 }
 
@@ -168,4 +251,3 @@ require_clean_mount_state() {
 with_temp_dir() {
     mktemp -d "${TMPDIR:-/tmp}/napos.XXXXXXXX"
 }
-

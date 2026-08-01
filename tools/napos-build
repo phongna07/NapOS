@@ -13,6 +13,11 @@ TEMP_PATHS=()
 BUILD_STARTED_AT=0
 BUILT_ISO=""
 DOCTOR_FAILURES=0
+CHROME_DEB_PATH=""
+CHROME_VERSION=""
+CHROME_DEB_SHA256=""
+CHROME_DEB_SIZE=""
+CHROME_REPOSITORY_PACKAGE_PATH=""
 
 cleanup_temp_paths() {
     local path
@@ -68,7 +73,7 @@ Usage:
 
 Preferred interface:
   make doctor   Validate WSL2, tools, storage, sudo, and mounts
-  make fetch    Authenticate and cache Linux Mint 22.3 Cinnamon
+  make fetch    Authenticate and cache Linux Mint plus current Chrome stable
   make dev      Build and verify an LZ4 development ISO
   make release  Build and verify an XZ release ISO
   make verify ISO=dist/NapOS-...iso
@@ -76,7 +81,8 @@ Preferred interface:
   make test     Run non-networked safety and branding checks
 
 Generated files are written below dist/. Builds are not byte-reproducible
-because package versions are resolved from live Mint and Ubuntu repositories.
+because package versions are resolved from live Mint, Ubuntu, and Google
+repositories.
 
 Development artifacts:
   dist/NapOS-0.1.0-dev-cinnamon-amd64.iso
@@ -123,7 +129,7 @@ check_disk_space() {
 
 check_tools() {
     local command
-    local commands=(awk bash chroot cmp curl cut df diff du file find findmnt flock git gpg head jq make md5sum mktemp mount mountpoint mksquashfs mv readlink realpath rm rsync sed sha256sum shellcheck sort stat sudo sync tee unsquashfs xargs xorriso)
+    local commands=(awk bash chroot cmp curl cut df diff dpkg-deb du file find findmnt flock git gpg head jq make md5sum mktemp mount mountpoint mksquashfs mv readlink realpath rm rsync sed sha256sum shellcheck sort stat sudo sync tee unsquashfs xargs xorriso)
     for command in "${commands[@]}"; do
         command -v "$command" >/dev/null 2>&1 || {
             warn "Missing command: $command"
@@ -257,6 +263,120 @@ verify_signed_manifest() {
     ok "Signed manifest matches the pinned ISO hash."
 }
 
+download_transient() {
+    local url=$1
+    local destination=$2
+    run_external curl --fail --location --retry 2 --retry-delay 2 --retry-all-errors \
+        --connect-timeout 20 --speed-time 60 --speed-limit 1024 \
+        --output "$destination" "$url"
+}
+
+quarantine_chrome_file() {
+    local path=$1
+    local quarantine
+    [[ -f "$path" ]] || return 0
+    quarantine="${path}.invalid.$(date -u +%Y%m%dT%H%M%SZ)"
+    mv -- "$path" "$quarantine"
+    warn "Quarantined an invalid Chrome package at $quarantine"
+}
+
+validate_chrome_deb() {
+    local path=$1
+    local expected_version=$2
+    local expected_sha256=$3
+    local expected_size=$4
+    local package version architecture
+    verify_file_sha256_and_size "$path" "$expected_sha256" "$expected_size" || return 1
+    package=$(dpkg-deb -f "$path" Package 2>/dev/null) || return 1
+    version=$(dpkg-deb -f "$path" Version 2>/dev/null) || return 1
+    architecture=$(dpkg-deb -f "$path" Architecture 2>/dev/null) || return 1
+    [[ "$package" == "$GOOGLE_CHROME_PACKAGE" ]] || return 1
+    [[ "$version" == "$expected_version" ]] || return 1
+    [[ "$architecture" == "$GOOGLE_CHROME_ARCH" ]]
+}
+
+fetch_chrome_deb() {
+    local destination=$1
+    local expected_version=$2
+    local expected_sha256=$3
+    local expected_size=$4
+    local part="${destination}.part"
+
+    if [[ -f "$destination" ]]; then
+        if validate_chrome_deb "$destination" "$expected_version" "$expected_sha256" "$expected_size"; then
+            ok "Using authenticated cached Google Chrome $expected_version."
+            return 0
+        fi
+        quarantine_chrome_file "$destination"
+    fi
+
+    mkdir -p "$(dirname "$destination")"
+    if [[ -f "$part" ]]; then
+        quarantine_chrome_file "$part"
+    fi
+    log "Downloading Google Chrome stable $expected_version..."
+    download_transient "$GOOGLE_CHROME_DEB_URL" "$part" || return 1
+    if ! validate_chrome_deb "$part" "$expected_version" "$expected_sha256" "$expected_size"; then
+        quarantine_chrome_file "$part"
+        return 1
+    fi
+    mv -- "$part" "$destination"
+    ok "Google Chrome .deb matches signed repository metadata."
+}
+
+fetch_google_chrome_attempt() {
+    local temp gnupg_home key_file inrelease packages status_file
+    local actual_primary valid_primary release_metadata packages_sha256 packages_size
+    local package_metadata package_filename destination
+
+    temp=$(with_temp_dir)
+    TEMP_PATHS+=("$temp")
+    gnupg_home="$temp/gnupg"
+    key_file="$temp/linux_signing_key.pub"
+    inrelease="$temp/InRelease"
+    packages="$temp/Packages"
+    status_file="$temp/gpg.status"
+    mkdir -m 0700 "$gnupg_home"
+
+    download_transient "$GOOGLE_CHROME_SIGNING_KEY_URL" "$key_file" || return 1
+    actual_primary=$(primary_key_fingerprint "$key_file") || return 1
+    [[ "$(trim_fingerprint "$actual_primary")" == "$(trim_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT")" ]] || return 1
+    gpg --homedir "$gnupg_home" --batch --import "$key_file" >/dev/null 2>&1 || return 1
+
+    download_transient "$GOOGLE_CHROME_APT_URL/dists/stable/InRelease" "$inrelease" || return 1
+    gpg --homedir "$gnupg_home" --batch --status-fd 1 --verify "$inrelease" \
+        >"$status_file" 2>/dev/null || return 1
+    valid_primary=$(awk '$2 == "VALIDSIG" { print $NF; exit }' "$status_file")
+    [[ "$(trim_fingerprint "$valid_primary")" == "$(trim_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT")" ]] || return 1
+
+    release_metadata=$(release_file_metadata "$inrelease" "main/binary-$GOOGLE_CHROME_ARCH/Packages") || return 1
+    IFS=$'\t' read -r packages_sha256 packages_size <<<"$release_metadata"
+    download_transient "$GOOGLE_CHROME_APT_URL/dists/stable/main/binary-$GOOGLE_CHROME_ARCH/Packages" "$packages" || return 1
+    verify_file_sha256_and_size "$packages" "$packages_sha256" "$packages_size" || return 1
+
+    package_metadata=$(chrome_package_metadata "$packages") || return 1
+    IFS=$'\t' read -r CHROME_VERSION package_filename CHROME_DEB_SHA256 CHROME_DEB_SIZE <<<"$package_metadata"
+    [[ "$package_filename" == pool/main/g/google-chrome-stable/*.deb ]] || return 1
+    destination="$CHROME_DOWNLOAD_DIR/$CHROME_DEB_SHA256/$(basename "$package_filename")"
+    fetch_chrome_deb "$destination" "$CHROME_VERSION" "$CHROME_DEB_SHA256" "$CHROME_DEB_SIZE" || return 1
+
+    CHROME_DEB_PATH=$destination
+    CHROME_REPOSITORY_PACKAGE_PATH=$package_filename
+    ok "Authenticated Google Chrome signing fingerprint: $actual_primary"
+    ok "Resolved Google Chrome stable: $CHROME_VERSION"
+}
+
+fetch_google_chrome() {
+    local attempt
+    for attempt in 1 2 3; do
+        if fetch_google_chrome_attempt; then
+            return 0
+        fi
+        warn "Google Chrome metadata/package resolution attempt $attempt of 3 failed."
+    done
+    die "Unable to authenticate a consistent Google Chrome stable package after 3 attempts."
+}
+
 cmd_fetch() {
     local manifest="$DOWNLOAD_DIR/sha256sum.txt"
     local signature="$DOWNLOAD_DIR/sha256sum.txt.gpg"
@@ -287,6 +407,7 @@ cmd_fetch() {
     printf 'sha256=%s\nverified_at=%s\n' "$actual" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$DOWNLOAD_DIR/$BASE_ISO_NAME.verified"
     ok "Authenticated base ISO SHA-256: $actual"
     ok "Authenticated base ISO: $iso"
+    fetch_google_chrome
 }
 
 base_iso_path() {
@@ -412,10 +533,12 @@ mount_chroot() {
 
 install_packages_and_hooks() {
     local hook hook_name
+    [[ -f "$CHROME_DEB_PATH" ]] || die "Authenticated Google Chrome package is unavailable."
     save_and_enable_dns
     printf '#!/bin/sh\nexit 101\n' | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" >/dev/null
     sudo chmod 0755 "$ROOTFS/usr/sbin/policy-rc.d"
     sudo install -m 0644 "$CONFIG_DIR/packages.txt" "$ROOTFS/tmp/napos-packages.txt"
+    sudo install -m 0644 "$CHROME_DEB_PATH" "$ROOTFS/tmp/napos-google-chrome.deb"
     sudo mkdir -p "$ROOTFS/tmp/napos-hooks"
     if compgen -G "$CONFIG_DIR/hooks/*.sh" >/dev/null; then
         sudo cp "$CONFIG_DIR"/hooks/*.sh "$ROOTFS/tmp/napos-hooks/"
@@ -429,6 +552,7 @@ install_packages_and_hooks() {
             apt-get update
             sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/napos-packages.txt |
                 xargs -r apt-get install -y --no-install-recommends
+            apt-get install -y --no-install-recommends /tmp/napos-google-chrome.deb
         '
 
     log "Applying the NapOS filesystem overlay..."
@@ -451,7 +575,7 @@ install_packages_and_hooks() {
 }
 
 validate_customized_rootfs() {
-    local package
+    local package chrome_key_fingerprint chrome_source
     local packages=(vlc flameshot git curl htop vim)
     sudo chroot "$ROOTFS" /bin/bash -euc '
         source /usr/lib/os-release
@@ -469,6 +593,9 @@ validate_customized_rootfs() {
         [[ -f /usr/share/backgrounds/napos/napos-wallpaper.svg ]]
         [[ -f /usr/share/icons/hicolor/scalable/apps/napos-logo.svg ]]
         [[ -s /etc/dconf/db/local ]]
+        [[ -x /usr/bin/google-chrome-stable ]]
+        [[ -f /usr/share/applications/google-chrome.desktop ]]
+        [[ ! -e /var/lib/flatpak/app/com.google.Chrome ]]
         grep -q "napos-wallpaper.svg" /etc/dconf/db/local.d/00-napos
         grep -Rqs "Name=Install NapOS" /usr/share/applications
         grep -Rqs "Name\[vi\]=Cài đặt NapOS" /usr/share/applications
@@ -476,12 +603,23 @@ validate_customized_rootfs() {
     '
     sudo cmp -s "$ROOTFS/etc/lsb-release" "$BASE_CACHE_DIR/rootfs/etc/lsb-release" ||
         die "/etc/lsb-release changed; Mint technical identity must be preserved."
-    sudo diff -qr "$ROOTFS/etc/apt" "$BASE_CACHE_DIR/rootfs/etc/apt" >/dev/null ||
-        die "APT source configuration changed; Mint repository metadata must be preserved."
+    sudo diff -qr --exclude=google-chrome.sources \
+        "$ROOTFS/etc/apt" "$BASE_CACHE_DIR/rootfs/etc/apt" >/dev/null ||
+        die "Mint APT configuration changed outside the approved Google Chrome source."
+    chrome_source="$ROOTFS/etc/apt/sources.list.d/google-chrome.sources"
+    [[ -f "$chrome_source" ]] || die "Google Chrome APT source is missing."
+    validate_chrome_apt_source "$chrome_source" || die "Unexpected Google Chrome APT source configuration."
+    chrome_key_fingerprint=$(primary_key_fingerprint "$ROOTFS/usr/share/keyrings/google-chrome.gpg")
+    [[ "$(trim_fingerprint "$chrome_key_fingerprint")" == "$(trim_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT")" ]] ||
+        die "Installed Google Chrome keyring fingerprint mismatch: $chrome_key_fingerprint"
     for package in "${packages[@]}"; do
         sudo chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$package" | grep -q '^ii' ||
             die "Expected package is not installed: $package"
     done
+    [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$GOOGLE_CHROME_PACKAGE")" == ii* ]] ||
+        die "Expected package is not installed: $GOOGLE_CHROME_PACKAGE"
+    [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${Version}' "$GOOGLE_CHROME_PACKAGE")" == "$CHROME_VERSION" ]] ||
+        die "Installed Google Chrome version differs from authenticated package metadata."
     if sudo grep -Rqs --exclude='napos-build' 'Napos' \
         "$ROOTFS/etc/napos-release" "$ROOTFS/usr/lib/os-release" \
         "$ROOTFS/usr/share/applications"; then
@@ -494,7 +632,7 @@ clean_chroot() {
     log "Cleaning package and build state..."
     sudo chroot "$ROOTFS" /bin/bash -euxc '
         apt-get clean
-        rm -rf /var/lib/apt/lists/* /tmp/napos-hooks /tmp/napos-packages.txt
+        rm -rf /var/lib/apt/lists/* /tmp/napos-hooks /tmp/napos-packages.txt /tmp/napos-google-chrome.deb
         rm -f /usr/sbin/policy-rc.d /var/lib/dbus/machine-id
         : > /etc/machine-id
     '
@@ -568,6 +706,14 @@ write_build_info() {
         --argjson git_dirty "$(git_dirty)" \
         --arg package_list_sha256 "$(package_list_hash)" \
         --arg manifest_remove_sha256 "$(sha256_of "$ISO_TREE/casper/filesystem.manifest-remove")" \
+        --arg chrome_package "$GOOGLE_CHROME_PACKAGE" \
+        --arg chrome_version "$CHROME_VERSION" \
+        --arg chrome_architecture "$GOOGLE_CHROME_ARCH" \
+        --arg chrome_url "$GOOGLE_CHROME_DEB_URL" \
+        --arg chrome_sha256 "$CHROME_DEB_SHA256" \
+        --arg chrome_repository "$GOOGLE_CHROME_APT_URL" \
+        --arg chrome_repository_package_path "$CHROME_REPOSITORY_PACKAGE_PATH" \
+        --arg chrome_signing_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT" \
         --arg timestamp "$BUILD_TIMESTAMP" \
         --arg xorriso_version "$(xorriso -version 2>&1 | head -n1)" \
         --arg squashfs_version "$(unsquashfs -version 2>&1 | head -n1)" \
@@ -575,7 +721,11 @@ write_build_info() {
         '{product:$product, version:$version, build_id:$build_id, profile:$profile,
           compression:$compression, base:{version:$base_version, iso:$base_iso, sha256:$base_sha256},
           source:{git_commit:$git_commit, git_dirty:$git_dirty, package_list_sha256:$package_list_sha256,
-                  manifest_remove_sha256:$manifest_remove_sha256},
+                  manifest_remove_sha256:$manifest_remove_sha256,
+                  google_chrome:{package:$chrome_package, version:$chrome_version,
+                    architecture:$chrome_architecture, url:$chrome_url, sha256:$chrome_sha256,
+                    repository:$chrome_repository, repository_package_path:$chrome_repository_package_path,
+                    signing_fingerprint:$chrome_signing_fingerprint}},
           built_at:$timestamp, tools:{xorriso:$xorriso_version, squashfs:$squashfs_version},
           duration_seconds:$duration_seconds, byte_reproducible:false}' >"$info"
 }
@@ -642,7 +792,7 @@ cmd_verify() {
     local iso temp boot_report pvd_report sidecar
     local package napos_release os_release timezone installer locale_data dconf_data
     local squashfs_report compression expected_compression base_iso
-    local build_info
+    local build_info chrome_source_file chrome_key_file chrome_key_fingerprint chrome_version
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
     sidecar="${iso}.sha256"
@@ -690,6 +840,20 @@ cmd_verify() {
     unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local >/dev/null 2>&1 || die "Compiled NapOS dconf database is missing."
     installer=$(read_installer_launcher "$temp/filesystem.squashfs") ||
         die "No supported installer launcher exists in the SquashFS."
+    chrome_source_file="$temp/google-chrome.sources"
+    chrome_key_file="$temp/google-chrome.gpg"
+    unsquashfs -cat "$temp/filesystem.squashfs" etc/apt/sources.list.d/google-chrome.sources \
+        >"$chrome_source_file" 2>/dev/null || die "Google Chrome APT source is missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/keyrings/google-chrome.gpg \
+        >"$chrome_key_file" 2>/dev/null || die "Google Chrome APT keyring is missing."
+    validate_chrome_apt_source "$chrome_source_file" || die "Google Chrome APT source is invalid."
+    chrome_key_fingerprint=$(primary_key_fingerprint "$chrome_key_file")
+    [[ "$(trim_fingerprint "$chrome_key_fingerprint")" == "$(trim_fingerprint "$GOOGLE_CHROME_SIGNING_FINGERPRINT")" ]] ||
+        die "Google Chrome APT keyring fingerprint mismatch: $chrome_key_fingerprint"
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/applications/google-chrome.desktop >/dev/null 2>&1 ||
+        die "Google Chrome desktop launcher is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/google-chrome-stable 2>/dev/null |
+        grep -q 'usr/bin/google-chrome-stable' || die "Google Chrome executable is missing."
 
     grep -qx 'NAPOS_NAME="NapOS"' <<<"$napos_release" || die "Embedded NapOS identity is incorrect."
     grep -qx 'NAPOS_VERSION="0.1.0"' <<<"$napos_release" || die "Embedded NapOS version is incorrect."
@@ -707,9 +871,15 @@ cmd_verify() {
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/backgrounds/napos/napos-wallpaper.svg >/dev/null 2>&1 || die "NapOS wallpaper is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/icons/hicolor/scalable/apps/napos-logo.svg >/dev/null 2>&1 || die "NapOS logo is missing."
 
-    for package in vlc flameshot git curl htop vim; do
+    for package in vlc flameshot git curl htop vim "$GOOGLE_CHROME_PACKAGE"; do
         grep -Eq "^${package} " "$temp/filesystem.manifest" || die "Package is absent from filesystem.manifest: $package"
     done
+    chrome_version=$(awk -v wanted="$GOOGLE_CHROME_PACKAGE" '$1 == wanted { print $2; exit }' \
+        "$temp/filesystem.manifest")
+    [[ -n "$chrome_version" ]] || die "Google Chrome version is absent from filesystem.manifest."
+    if grep -Eq "^${GOOGLE_CHROME_PACKAGE}([[:space:]]|$)" "$temp/filesystem.manifest-remove"; then
+        die "Google Chrome is listed for removal by the live installer."
+    fi
     if grep -q 'Napos' <<<"$napos_release$os_release$installer"; then
         die 'Incorrect product capitalization "Napos" found in the ISO.'
     fi
@@ -722,6 +892,22 @@ cmd_verify() {
             die "Adjacent provenance and SquashFS compression differ."
         [[ "$(jq -r .source.manifest_remove_sha256 "$build_info")" == "$(sha256_of "$temp/filesystem.manifest-remove")" ]] ||
             die "Adjacent provenance and manifest-remove hash differ."
+        [[ "$(jq -r .source.google_chrome.package "$build_info")" == "$GOOGLE_CHROME_PACKAGE" ]] ||
+            die "Adjacent provenance has an unexpected Google Chrome package name."
+        [[ "$(jq -r .source.google_chrome.version "$build_info")" == "$chrome_version" ]] ||
+            die "Adjacent provenance and Google Chrome manifest versions differ."
+        [[ "$(jq -r .source.google_chrome.architecture "$build_info")" == "$GOOGLE_CHROME_ARCH" ]] ||
+            die "Adjacent provenance has an unexpected Google Chrome architecture."
+        [[ "$(jq -r .source.google_chrome.url "$build_info")" == "$GOOGLE_CHROME_DEB_URL" ]] ||
+            die "Adjacent provenance has an unexpected Google Chrome download URL."
+        [[ "$(jq -r .source.google_chrome.repository "$build_info")" == "$GOOGLE_CHROME_APT_URL" ]] ||
+            die "Adjacent provenance has an unexpected Google Chrome repository."
+        [[ "$(jq -r .source.google_chrome.repository_package_path "$build_info")" == pool/main/g/google-chrome-stable/*.deb ]] ||
+            die "Adjacent provenance has an unexpected Google Chrome repository package path."
+        [[ "$(jq -r .source.google_chrome.signing_fingerprint "$build_info")" == "$GOOGLE_CHROME_SIGNING_FINGERPRINT" ]] ||
+            die "Adjacent provenance has an unexpected Google Chrome signing fingerprint."
+        [[ "$(jq -r .source.google_chrome.sha256 "$build_info")" =~ ^[a-f0-9]{64}$ ]] ||
+            die "Adjacent provenance has an invalid Google Chrome SHA-256."
     fi
     ok "NapOS identity, packages, locale, timezone, artwork, and installer metadata are valid."
     ok "Verified ISO: $iso"
@@ -742,7 +928,7 @@ cmd_inspect() {
     printf '\nNapOS release:\n'
     unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
     printf '\nSelected packages:\n'
-    for package in vlc flameshot git curl htop vim; do
+    for package in vlc flameshot git curl htop vim "$GOOGLE_CHROME_PACKAGE"; do
         awk -v wanted="$package" '$1 == wanted {print; found=1} END {if (!found) print wanted " (missing)"}' \
             "$temp/filesystem.manifest"
     done
@@ -763,17 +949,17 @@ cmd_build() {
     flock -n 9 || die "Another NapOS build holds $WORK_DIR/.build.lock"
 
     BUILD_PROFILE=$profile
-    BUILD_ID=$(build_id)
     BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     BUILD_STARTED_AT=$(date +%s)
-    export BUILD_PROFILE BUILD_ID BUILD_TIMESTAMP
     log_file="$DIST_DIR/build-${profile}.log"
     : >"$log_file"
     exec > >(tee -a "$log_file") 2>&1
     ACTIVE_BUILD=1
 
-    log "Starting NapOS $NAPOS_VERSION $profile build (build ID $BUILD_ID)"
     cmd_fetch
+    BUILD_ID=$(build_id)
+    export BUILD_PROFILE BUILD_ID BUILD_TIMESTAMP
+    log "Starting NapOS $NAPOS_VERSION $profile build (build ID $BUILD_ID)"
     prepare_base_cache
     prepare_work_tree
     install_packages_and_hooks

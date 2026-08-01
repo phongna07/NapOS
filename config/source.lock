@@ -2,3 +2,13 @@
 MINT_SIGNING_KEY_ID="27DEB15644C6B3CF3BD7D291300F846BA25BAE09"
 MINT_SIGNING_FINGERPRINT="27DEB15644C6B3CF3BD7D291300F846BA25BAE09"
 BASE_ISO_SHA256="a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4"
+
+# Authenticated Google Chrome stable input. The package version and checksum
+# are resolved from Google's signed APT metadata for every fetch.
+GOOGLE_CHROME_PACKAGE="google-chrome-stable"
+GOOGLE_CHROME_ARCH="amd64"
+GOOGLE_CHROME_DEB_URL="https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+GOOGLE_CHROME_APT_URL="https://dl.google.com/linux/chrome/deb"
+GOOGLE_CHROME_SIGNING_KEY_URL="https://dl.google.com/linux/linux_signing_key.pub"
+GOOGLE_CHROME_SIGNING_FINGERPRINT="EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796"
+GOOGLE_CHROME_INSTALLED_APT_URI="https://dl.google.com/linux/chrome-stable/deb/"

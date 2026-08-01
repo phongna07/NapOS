@@ -16,9 +16,10 @@ make dev
 ```
 
 `make dev` is the complete development workflow. It authenticates and caches
-the Mint ISO when necessary, makes a fresh work tree, installs packages,
-applies NapOS customization, builds an LZ4 SquashFS, preserves Mint's BIOS and
-EFI boot equipment, verifies the result, and writes artifacts to `dist/`.
+the Mint ISO and current Google Chrome stable package, makes a fresh work tree,
+installs packages, applies NapOS customization, builds an LZ4 SquashFS,
+preserves Mint's BIOS and EFI boot equipment, verifies the result, and writes
+artifacts to `dist/`.
 
 Expected output:
 
@@ -41,9 +42,9 @@ make release
 | --- | --- |
 | `make help` | Prints the supported interface without network or root access. |
 | `make doctor` | Checks WSL2, native storage, 30 GiB free space, tools, sudo, and temporary mount capability. |
-| `make fetch` | Downloads Mint manifests and ISO, verifies Mint's signing fingerprint, GPG signature, signed SHA-256, and committed lock. |
-| `make dev` | Builds and verifies a fresh LZ4 ISO. |
-| `make release` | Builds and verifies a fresh XZ ISO. |
+| `make fetch` | Authenticates and caches the Mint ISO plus the latest Chrome stable `.deb` selected through Google's signed repository metadata. |
+| `make dev` | Fetches current authenticated inputs, then builds and verifies a fresh LZ4 ISO. |
+| `make release` | Fetches current authenticated inputs, then builds and verifies a fresh XZ ISO. |
 | `make verify ISO=...` | Rechecks SHA-256, volume, BIOS/EFI entries, embedded identity, packages, artwork, locale, timezone, and installer launcher. |
 | `make inspect ISO=...` | Prints ISO, boot, SquashFS, NapOS release, and provenance details. |
 | `make test` | Runs Bash syntax, ShellCheck, safety, checksum, package-profile, and capitalization tests. |
@@ -57,13 +58,15 @@ under `dist/`.
 
 1. **Doctor:** fails early if the host cannot safely build an ISO.
 2. **Fetch:** authenticates the signed Mint checksum manifest before trusting
-   the ISO checksum.
+   the ISO checksum, and authenticates Chrome through Google's signed APT
+   metadata and pinned signing-key fingerprint.
 3. **Base cache:** extracts ISO content with `xorriso` and expands SquashFS once
    into a cache keyed by the authenticated ISO hash.
 4. **Fresh work tree:** copies the immutable cache for every build so package
    changes never accumulate across builds.
-5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, and Vim;
-   applies English/Bangkok defaults and original NapOS artwork.
+5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, Vim, and the
+   authenticated official Google Chrome `.deb`; applies English/Bangkok
+   defaults and original NapOS artwork.
 6. **Clean:** removes APT/build state, restores DNS, and verifies all chroot
    mounts are gone.
 7. **Pack:** creates LZ4 or XZ SquashFS and refreshes Casper size, package
@@ -73,8 +76,9 @@ under `dist/`.
 9. **Verify:** inspects the finished ISO before it is handed off for VM tests.
 
 Builds are intentionally not claimed to be byte-reproducible: package versions
-are resolved from live Linux Mint and Ubuntu repositories. The adjacent JSON
-records the source and tool inputs for each build.
+are resolved from live Linux Mint, Ubuntu, and Google repositories. The
+adjacent JSON records the source and tool inputs for each build, including the
+exact Chrome version and SHA-256.
 
 ## NapOS identity policy
 
@@ -82,8 +86,9 @@ The user-facing product name is always **NapOS**. Machine identifiers and paths
 use lowercase `napos`; the ISO volume ID is `NAPOS_0_1_0`.
 
 NapOS preserves `ID=linuxmint`, Mint 22.3 codename `zena`, Ubuntu codename
-`noble`, `/etc/lsb-release`, and the upstream APT sources so Mint's package and
-repository tools continue to work.
+`noble`, `/etc/lsb-release`, and the upstream Mint APT sources. Chrome's
+official signed APT source is added separately so installed systems receive
+browser security updates.
 
 ## Testing and recovery
 
@@ -95,5 +100,6 @@ repository tools continue to work.
 
 Original build scripts and NapOS artwork in this repository are licensed under
 GPL-3.0-only. Linux Mint and installed packages retain their respective
-licenses. No proprietary browser, office suite, chat client, or third-party
-branding is bundled by this workflow.
+licenses. Google Chrome is proprietary and subject to Google's terms; this
+workflow is intended for private/internal images unless separate redistribution
+permission applies.

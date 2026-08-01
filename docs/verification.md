@@ -21,9 +21,15 @@ Confirm the output shows:
   `27DEB15644C6B3CF3BD7D291300F846BA25BAE09`.
 - A valid detached signature for `sha256sum.txt`.
 - The pinned Cinnamon ISO SHA-256.
+- Google Linux signing fingerprint
+  `EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796`.
+- A Google Chrome stable version whose `.deb` matches Google's signed repository
+  metadata.
 - An authenticated ISO below `cache/downloads/`.
 
-A second invocation should reuse the ISO. If the cached ISO changes, the
+A second invocation should reuse the ISO and a still-current authenticated
+Chrome package. Google metadata is refreshed on every fetch so a newly released
+stable package is selected automatically. If either cached input changes, the
 workflow quarantines it and downloads a new copy.
 
 ## 3. Development build
@@ -59,8 +65,14 @@ Verification requires:
 - NapOS logo and wallpaper.
 - Installer label `Install NapOS`.
 - All selected desktop packages in `filesystem.manifest`.
+- The resolved `google-chrome-stable` version, executable, desktop launcher,
+  official APT source, and signing key inside the live SquashFS.
+- No `google-chrome-stable` entry in `filesystem.manifest-remove`, so the
+  installed system retains Chrome.
 
 Inspection prints the SquashFS compression and the adjacent provenance JSON.
+The JSON records the exact Chrome version, SHA-256, repository package path,
+and Google signing fingerprint used by the build.
 
 ## 5. Release build
 
