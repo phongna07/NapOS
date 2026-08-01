@@ -76,6 +76,31 @@ picture-options='zoom'
 EOF
 dconf update
 
+printf '[NapOS] Configuring Google Chrome as the default browser...\n'
+mimeapps_files=(
+    /usr/share/applications/mimeapps.list
+    /usr/share/ubuntu-system-adjustments/mimeapps.list
+)
+for mimeapps_file in "${mimeapps_files[@]}"; do
+    [[ -f "$mimeapps_file" ]] || {
+        printf 'Required MIME application policy is missing: %s\n' "$mimeapps_file" >&2
+        exit 1
+    }
+    sed -i 's/=firefox\.desktop$/=google-chrome.desktop/' "$mimeapps_file"
+done
+
+launcher_schemas=(
+    /usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json
+    /usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json
+)
+for launcher_schema in "${launcher_schemas[@]}"; do
+    [[ -f "$launcher_schema" ]] || {
+        printf 'Required Cinnamon launcher schema is missing: %s\n' "$launcher_schema" >&2
+        exit 1
+    }
+    sed -i 's/firefox\.desktop/google-chrome.desktop/g' "$launcher_schema"
+done
+
 printf '[NapOS] Branding the installer launcher...\n'
 installer_found=0
 for desktop in \

@@ -17,9 +17,9 @@ make dev
 
 `make dev` is the complete development workflow. It authenticates and caches
 the Mint ISO and current Google Chrome stable package, makes a fresh work tree,
-installs packages, applies NapOS customization, builds an LZ4 SquashFS,
-preserves Mint's BIOS and EFI boot equipment, verifies the result, and writes
-artifacts to `dist/`.
+installs selected packages, removes Firefox, applies NapOS customization,
+builds an LZ4 SquashFS, preserves Mint's BIOS and EFI boot equipment, verifies
+the result, and writes artifacts to `dist/`.
 
 Expected output:
 
@@ -65,8 +65,9 @@ under `dist/`.
 4. **Fresh work tree:** copies the immutable cache for every build so package
    changes never accumulate across builds.
 5. **Customize:** installs VLC, Flameshot, Git, Curl, Htop, Vim, and the
-   authenticated official Google Chrome `.deb`; applies English/Bangkok
-   defaults and original NapOS artwork.
+   authenticated official Google Chrome `.deb`; purges Firefox, its language
+   packs, and Mint Chat; makes Chrome the default browser; and applies
+   English/Bangkok defaults and original NapOS artwork.
 6. **Clean:** removes APT/build state, restores DNS, and verifies all chroot
    mounts are gone.
 7. **Pack:** creates LZ4 or XZ SquashFS and refreshes Casper size, package
@@ -78,7 +79,9 @@ under `dist/`.
 Builds are intentionally not claimed to be byte-reproducible: package versions
 are resolved from live Linux Mint, Ubuntu, and Google repositories. The
 adjacent JSON records the source and tool inputs for each build, including the
-exact Chrome version and SHA-256.
+exact Chrome version and SHA-256 plus hashes of the package installation and
+removal policies. Repository additions are listed in `config/packages.txt`;
+base-image removals are listed in `config/packages-remove.txt`.
 
 ## NapOS identity policy
 

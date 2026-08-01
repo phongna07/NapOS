@@ -65,14 +65,20 @@ Verification requires:
 - NapOS logo and wallpaper.
 - Installer label `Install NapOS`.
 - All selected desktop packages in `filesystem.manifest`.
+- No Firefox, Firefox locale, or Mint Chat package in `filesystem.manifest`.
 - The resolved `google-chrome-stable` version, executable, desktop launcher,
   official APT source, and signing key inside the live SquashFS.
+- Google Chrome assigned as the HTTP/HTML handler and present in Cinnamon's
+  default panel launchers, with no remaining Firefox launcher.
 - No `google-chrome-stable` entry in `filesystem.manifest-remove`, so the
   installed system retains Chrome.
+- An unchanged `filesystem.manifest-remove` from the authenticated Mint ISO.
+  Its Firefox locale entries are preserved upstream installer metadata and do
+  not indicate that those packages remain in the customized SquashFS.
 
 Inspection prints the SquashFS compression and the adjacent provenance JSON.
 The JSON records the exact Chrome version, SHA-256, repository package path,
-and Google signing fingerprint used by the build.
+Google signing fingerprint, and package-removal policy hash used by the build.
 
 ## 5. Release build
 

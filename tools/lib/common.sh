@@ -76,6 +76,8 @@ validate_config() {
     [[ "$GOOGLE_CHROME_INSTALLED_APT_URI" == "https://dl.google.com/linux/chrome-stable/deb/" ]] ||
         die "Unexpected installed Google Chrome APT URI."
     [[ -f "$CONFIG_DIR/packages.txt" ]] || die "Missing package list: $CONFIG_DIR/packages.txt"
+    [[ -f "$CONFIG_DIR/packages-remove.txt" ]] ||
+        die "Missing package removal list: $CONFIG_DIR/packages-remove.txt"
     [[ -d "$CONFIG_DIR/overlay" ]] || die "Missing overlay directory: $CONFIG_DIR/overlay"
 }
 
@@ -188,8 +190,17 @@ validate_chrome_apt_source() {
         grep -qx 'Signed-By: /usr/share/keyrings/google-chrome.gpg' "$source_file"
 }
 
+package_file_hash() {
+    local package_file=$1
+    sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$package_file" | sort | sha256sum | awk '{print $1}'
+}
+
 package_list_hash() {
-    sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$CONFIG_DIR/packages.txt" | sort | sha256sum | awk '{print $1}'
+    package_file_hash "$CONFIG_DIR/packages.txt"
+}
+
+package_remove_list_hash() {
+    package_file_hash "$CONFIG_DIR/packages-remove.txt"
 }
 
 git_revision() {
@@ -205,7 +216,7 @@ git_dirty() {
 }
 
 build_id() {
-    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|${CHROME_DEB_SHA256:-unresolved}|$(git_revision)" |
+    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|$(git_revision)" |
         sha256sum | cut -c1-16
 }
 

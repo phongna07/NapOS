@@ -1,0 +1,11 @@
+# Packages removed from the Linux Mint base image.
+firefox
+firefox-locale-de
+firefox-locale-en
+firefox-locale-es
+firefox-locale-fr
+firefox-locale-it
+firefox-locale-nl
+firefox-locale-pt
+firefox-locale-ru
+mintchat

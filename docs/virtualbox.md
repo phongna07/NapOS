@@ -24,7 +24,8 @@ cp ~/napos/dist/NapOS-0.1.0-dev-cinnamon-amd64.iso \
 2. Boot the live desktop and confirm the NapOS wallpaper.
 3. Open `Install NapOS` and install to the VDI.
 4. Shut down, eject the ISO, and boot the installed system.
-5. Confirm applications, Google Chrome, DNS, `apt update`, English locale,
+5. Confirm applications, Google Chrome as the default browser, no Firefox or
+   Mint Chat launcher, DNS, `apt update`, English locale,
    Bangkok timezone, reboot, and shutdown.
 
 ## UEFI test

@@ -2,15 +2,15 @@
 - [ ] versioning and branching
 - [x] Change background
 - [ ] Change logo
-- [ ] Remove firefox
+- [x] Remove firefox
 - [ ] Remove libreoffice
+- [ ] remove celluloid media player
 - [x] Chrome
 - [ ] fcitx5-lotus
 - [ ] OBS Studio
 - [ ] OnlyOffice
 - [ ] Zalo appimage
 - [ ] zsh shell
-- [ ] remove celluloid media player
 - [ ] config vlc media player as the default
 - [ ] clipboard history
 - [ ] add desktop icons and taskbar icons

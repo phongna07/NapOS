@@ -198,6 +198,45 @@ else
     fail "Desktop-essential package profile is exact"
 fi
 
+expected_remove_packages=$'firefox\nfirefox-locale-de\nfirefox-locale-en\nfirefox-locale-es\nfirefox-locale-fr\nfirefox-locale-it\nfirefox-locale-nl\nfirefox-locale-pt\nfirefox-locale-ru\nmintchat'
+actual_remove_packages=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' \
+    "$PROJECT_ROOT/config/packages-remove.txt" | sort)
+if [[ "$actual_remove_packages" == "$expected_remove_packages" ]]; then
+    pass "Base-image package removal profile is exact"
+else
+    fail "Base-image package removal profile is exact"
+fi
+
+expected_remove_hash=$(printf '%s\n' "$expected_remove_packages" | sha256sum | awk '{print $1}')
+if [[ "$(package_remove_list_hash)" == "$expected_remove_hash" ]]; then
+    pass "Package removal profile hash is stable"
+else
+    fail "Package removal profile hash is stable"
+fi
+
+install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+if grep -Fq 'napos-packages-remove.txt' <<<"$install_function" &&
+    grep -Fq 'apt-get purge -y --' <<<"$install_function"; then
+    pass "Build consumes the package removal profile with APT purge"
+else
+    fail "Build consumes the package removal profile with APT purge"
+fi
+
+if grep -Eq 'apt(-get)?[[:space:]]+autoremove' "$PROJECT_ROOT/tools/napos-build"; then
+    fail "Package removal policy avoids APT autoremove"
+else
+    pass "Package removal policy avoids APT autoremove"
+fi
+
+if grep -Fq "s/=firefox\\.desktop\$/=google-chrome.desktop/" \
+    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+    grep -Fq "s/firefox\\.desktop/google-chrome.desktop/g" \
+        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+    pass "Desktop customization replaces Firefox defaults with Google Chrome"
+else
+    fail "Desktop customization replaces Firefox defaults with Google Chrome"
+fi
+
 if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then
     fail 'Incorrect product spelling "Napos" exists in configuration or assets'
 else
