@@ -78,7 +78,9 @@ make test
 ```
 
 `make help` lists the supported development commands, while `make test` runs
-the routine checks without requiring root access or a network connection.
+the routine checks without requiring root access or a network connection. See
+the [contributor build guide](docs/building.md) for native Ubuntu and WSL2 host
+requirements, dependency installation, and complete ISO build commands.
 
 ## License
 

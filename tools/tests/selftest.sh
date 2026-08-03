@@ -150,35 +150,101 @@ else
     fail "ISO volume ID is derived from the authoritative NapOS version"
 fi
 
-eval "$(sed -n '/^check_wsl2()/,/^check_native_filesystem()/p' \
+eval "$(sed -n '/^check_wsl()/,/^check_disk_space()/p' \
     "$PROJECT_ROOT/tools/napos-build" | sed '$d')"
 
-supported_wsl_host_fixture() (
+supported_native_ubuntu_fixture() (
+    # shellcheck disable=SC2317
+    check_ubuntu_host() { return 0; }
+    # shellcheck disable=SC2317
+    check_host_architecture() { return 0; }
+    # shellcheck disable=SC2317
+    check_wsl() { return 1; }
+    check_supported_build_host
+)
+expect_success "Supported-host policy accepts native Ubuntu amd64" \
+    supported_native_ubuntu_fixture
+
+supported_wsl2_ubuntu_fixture() (
+    # shellcheck disable=SC2317
+    check_ubuntu_host() { return 0; }
+    # shellcheck disable=SC2317
+    check_host_architecture() { return 0; }
+    # shellcheck disable=SC2317
+    check_wsl() { return 0; }
     # shellcheck disable=SC2317
     check_wsl2() { return 0; }
-    # shellcheck disable=SC2317
-    check_github_actions_ubuntu() { return 1; }
     check_supported_build_host
 )
-expect_success "Supported-host policy accepts WSL2" supported_wsl_host_fixture
+expect_success "Supported-host policy accepts Ubuntu amd64 on WSL2" \
+    supported_wsl2_ubuntu_fixture
 
-supported_github_host_fixture() (
+supported_github_ubuntu_fixture() (
+    GITHUB_ACTIONS=true
+    # shellcheck disable=SC2317
+    check_ubuntu_host() { return 0; }
+    # shellcheck disable=SC2317
+    check_host_architecture() { return 0; }
+    # shellcheck disable=SC2317
+    check_wsl() { return 1; }
+    check_supported_build_host && check_github_actions_ubuntu
+)
+expect_success "Supported-host policy and optimization accept GitHub Actions Ubuntu" \
+    supported_github_ubuntu_fixture
+
+native_ubuntu_not_github_fixture() (
+    GITHUB_ACTIONS=false
+    # shellcheck disable=SC2317
+    check_ubuntu_host() { return 0; }
+    check_github_actions_ubuntu
+)
+expect_failure "GitHub optimization rejects native Ubuntu outside Actions" \
+    native_ubuntu_not_github_fixture
+
+unsupported_non_ubuntu_fixture() (
+    # shellcheck disable=SC2317
+    check_ubuntu_host() { return 1; }
+    check_supported_build_host
+)
+expect_failure "Supported-host policy rejects non-Ubuntu hosts" unsupported_non_ubuntu_fixture
+
+unsupported_architecture_fixture() (
+    # shellcheck disable=SC2317
+    check_ubuntu_host() { return 0; }
+    # shellcheck disable=SC2317
+    check_host_architecture() { return 1; }
+    check_supported_build_host
+)
+expect_failure "Supported-host policy rejects non-amd64 Ubuntu" \
+    unsupported_architecture_fixture
+
+unsupported_wsl1_fixture() (
+    # shellcheck disable=SC2317
+    check_ubuntu_host() { return 0; }
+    # shellcheck disable=SC2317
+    check_host_architecture() { return 0; }
+    # shellcheck disable=SC2317
+    check_wsl() { return 0; }
     # shellcheck disable=SC2317
     check_wsl2() { return 1; }
-    # shellcheck disable=SC2317
-    check_github_actions_ubuntu() { return 0; }
     check_supported_build_host
 )
-expect_success "Supported-host policy accepts GitHub-hosted Ubuntu" supported_github_host_fixture
+expect_failure "Supported-host policy rejects WSL1" unsupported_wsl1_fixture
 
-unsupported_host_fixture() (
+filesystem_type_fixture() (
+    local mocked_type=$1
     # shellcheck disable=SC2317
-    check_wsl2() { return 1; }
-    # shellcheck disable=SC2317
-    check_github_actions_ubuntu() { return 1; }
-    check_supported_build_host
+    stat() { printf '%s\n' "$mocked_type"; }
+    check_supported_filesystem /mnt/linux-disk/napos
 )
-expect_failure "Supported-host policy rejects other hosts" unsupported_host_fixture
+expect_success "Linux filesystem below /mnt is accepted" filesystem_type_fixture ext2/ext3
+expect_success "XFS filesystem below /mnt is accepted" filesystem_type_fixture xfs
+
+for unsupported_filesystem in \
+    9p cifs smb2 fuse fuse.sshfs fuseblk ntfs ntfs3 exfat vfat nfs nfs4; do
+    expect_failure "Unsupported filesystem is rejected: $unsupported_filesystem" \
+        filesystem_type_fixture "$unsupported_filesystem"
+done
 
 cleanup_outside_github() {
     env -u GITHUB_ACTIONS -u RUNNER_ENVIRONMENT \

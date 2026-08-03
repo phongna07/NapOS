@@ -84,7 +84,7 @@ Usage:
   tools/napos-build clean-cache
 
 Preferred interface:
-  make doctor   Validate WSL2/GitHub Ubuntu, tools, storage, sudo, and mounts
+  make doctor   Validate native/WSL2 Ubuntu amd64, tools, storage, sudo, and mounts
   make fetch    Authenticate and cache Linux Mint, applications, input method, and theme
   make dev      Build and verify an LZ4 development ISO
   make release  Build and verify an XZ release ISO
@@ -359,13 +359,16 @@ validate_windows_10_dark_theme_archive() {
         grep -Fq 'GNU GENERAL PUBLIC LICENSE' || return 1
 }
 
-check_wsl2() {
-    grep -qi 'microsoft-standard-WSL2' /proc/sys/kernel/osrelease
+check_wsl() {
+    grep -qi 'microsoft' /proc/sys/kernel/osrelease
 }
 
-check_github_actions_ubuntu() {
+check_wsl2() {
+    grep -qi 'microsoft-standard' /proc/sys/kernel/osrelease
+}
+
+check_ubuntu_host() {
     (
-        is_github_actions || return 1
         [[ -r /etc/os-release ]] || return 1
         # shellcheck source=/dev/null
         source /etc/os-release
@@ -373,15 +376,32 @@ check_github_actions_ubuntu() {
     )
 }
 
-check_supported_build_host() {
-    check_wsl2 || check_github_actions_ubuntu
+check_host_architecture() {
+    [[ "$NAPOS_ARCH" == "amd64" ]] || return 1
+    [[ "$(dpkg --print-architecture 2>/dev/null)" == "amd64" ]]
 }
 
-check_native_filesystem() {
+check_github_actions_ubuntu() {
+    is_github_actions && check_ubuntu_host
+}
+
+check_supported_build_host() {
+    check_ubuntu_host || return 1
+    check_host_architecture || return 1
+    if check_wsl; then
+        check_wsl2
+    fi
+}
+
+check_supported_filesystem() {
+    local path=${1:-$PROJECT_ROOT}
     local type
-    [[ "$PROJECT_ROOT" != /mnt/* ]] || return 1
-    type=$(stat -f -c '%T' "$PROJECT_ROOT")
-    [[ "$type" != "9p" && "$type" != "cifs" && "$type" != "fuseblk" ]]
+    type=$(stat -f -c '%T' "$path") || return 1
+    case "$type" in
+        9p | cifs | smb2 | fuse | fuse.* | fuseblk | ntfs | ntfs3 | exfat | vfat | nfs | nfs4)
+            return 1
+            ;;
+    esac
 }
 
 check_disk_space() {
@@ -424,8 +444,8 @@ check_mount_capability() {
 cmd_doctor() {
     validate_config
     log "Environment doctor"
-    doctor_check "WSL2 or GitHub-hosted Ubuntu detected" check_supported_build_host
-    doctor_check "Project uses the native Linux filesystem" check_native_filesystem
+    doctor_check "Native or WSL2 Ubuntu amd64 detected" check_supported_build_host
+    doctor_check "Project uses a supported Linux filesystem" check_supported_filesystem
     doctor_check "At least ${MIN_FREE_GIB} GiB is available" check_disk_space
     doctor_check "All required commands are installed" check_tools
     [[ ${EUID:-$(id -u)} -ne 0 ]] || die "Run make doctor as your normal user, not root."
