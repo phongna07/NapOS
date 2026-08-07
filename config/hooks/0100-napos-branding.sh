@@ -72,9 +72,6 @@ EOF
 cat >/etc/dconf/db/local.d/00-napos <<'EOF'
 [org/cinnamon]
 enabled-applets=['panel1:center:0:menu@cinnamon.org', 'panel1:left:1:separator@cinnamon.org', 'panel1:center:1:grouped-window-list@cinnamon.org', 'panel1:right:0:systray@cinnamon.org', 'panel1:right:1:xapp-status@cinnamon.org', 'panel1:right:2:notifications@cinnamon.org', 'panel1:right:3:printers@cinnamon.org', 'panel1:right:4:removable-drives@cinnamon.org', 'panel1:right:5:keyboard@cinnamon.org', 'panel1:right:6:favorites@cinnamon.org', 'panel1:right:7:network@cinnamon.org', 'panel1:right:8:sound@cinnamon.org', 'panel1:right:9:power@cinnamon.org', 'panel1:right:10:calendar@cinnamon.org', 'panel1:right:11:cornerbar@cinnamon.org']
-startup-icon-name='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'
-system-icon='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'
-app-menu-icon-name='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'
 
 [org/cinnamon/desktop/interface]
 gtk-theme='Windows-10-Dark'
@@ -454,40 +451,6 @@ done
     exit 1
 }
 
-printf '[NapOS] Branding Ubiquity artwork and icon lookups...\n'
-for ubiquity_module in \
-    /usr/lib/ubiquity/ubiquity/gtkwidgets.py \
-    /usr/lib/ubiquity/plugins/ubi-partman.py; do
-    [[ -f "$ubiquity_module" ]] || {
-        printf 'Required Ubiquity module is missing: %s\n' "$ubiquity_module" >&2
-        exit 1
-    }
-    sed -i "s/'distributor-logo'/'napos-logo'/g" "$ubiquity_module"
-    if grep -Fq "'distributor-logo'" "$ubiquity_module"; then
-        printf 'Mint distributor icon lookup remains in: %s\n' "$ubiquity_module" >&2
-        exit 1
-    fi
-done
-for artwork in \
-    /usr/share/ubiquity/pixmaps/ubuntu/logo.png \
-    /usr/share/ubiquity/pixmaps/ubuntu_installed.png \
-    /usr/share/ubiquity-slideshow/slides/screenshots/welcome.png \
-    /usr/share/ubiquity-slideshow/slides/screenshots/applications.png; do
-    [[ -s "$artwork" ]] || {
-        printf 'Required NapOS installer artwork is missing: %s\n' "$artwork" >&2
-        exit 1
-    }
-done
-grep -Fq 'Welcome to NapOS' /usr/share/ubiquity-slideshow/slides/welcome.html || {
-    printf 'NapOS English installer welcome slide is missing.\n' >&2
-    exit 1
-}
-grep -Fq 'Chào mừng bạn đến với NapOS' \
-    /usr/share/ubiquity-slideshow/slides/l10n/vi/welcome.html || {
-    printf 'NapOS Vietnamese installer welcome slide is missing.\n' >&2
-    exit 1
-}
-
 printf '[NapOS] Branding installed GRUB while preserving its Ubuntu EFI ID...\n'
 for grub_generator in \
     /etc/grub.d/10_linux \
@@ -548,6 +511,5 @@ fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 fi
-glib-compile-schemas /usr/share/glib-2.0/schemas
 
 printf '[NapOS] Branding complete.\n'

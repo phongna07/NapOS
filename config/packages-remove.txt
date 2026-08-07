@@ -52,7 +52,6 @@ libuno-purpenvhelpergcc3-3t64
 libuno-sal3t64
 libuno-salhelpergcc3-3t64
 mintchat
-mintwelcome
 python3-uno
 uno-libs-private
 ure

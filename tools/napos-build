@@ -185,27 +185,11 @@ validate_cinnamon_menu_icon_defaults() {
     ' <<<"$menu_settings" >/dev/null
 }
 
-validate_cinnamon_branding_defaults() {
-    local dconf_data=$1
-    local expected_icon=/usr/share/icons/hicolor/scalable/apps/napos-logo.svg
-    awk -v expected_icon="$expected_icon" '
-        $0 == "[org/cinnamon]" { section="cinnamon"; next }
-        /^\[/ { section="" }
-        section == "cinnamon" && $0 == "startup-icon-name=\x27" expected_icon "\x27" { startup++ }
-        section == "cinnamon" && $0 == "system-icon=\x27" expected_icon "\x27" { system_icon++ }
-        section == "cinnamon" && $0 == "app-menu-icon-name=\x27" expected_icon "\x27" { app_menu++ }
-        END { exit !(startup == 1 && system_icon == 1 && app_menu == 1) }
-    ' <<<"$dconf_data"
-}
-
-brand_iso_boot_configuration() {
+brand_iso_boot_labels() {
     local grub_cfg=$1
     local isolinux_cfg=$2
-    local grub_theme=$3
-    local splash_source=$4
-    local splash_target=$5
-    local grub_kernel_before grub_kernel_after isolinux_kernel_before isolinux_kernel_after
-    for path in "$grub_cfg" "$isolinux_cfg" "$grub_theme" "$splash_source"; do
+    local grub_kernel_before grub_kernel_after isolinux_kernel_before isolinux_kernel_after path
+    for path in "$grub_cfg" "$isolinux_cfg"; do
         [[ -s "$path" ]] || return 1
     done
     grub_kernel_before=$(grep -E '^[[:space:]]*(linux|initrd)[[:space:]]' "$grub_cfg" | sha256sum)
@@ -220,8 +204,6 @@ brand_iso_boot_configuration() {
         -e 's/^([[:space:]]*menu label )Start Linux Mint in compatibility mode$/\1Start NapOS in compatibility mode/' \
         -e 's/^([[:space:]]*menu label )Start Linux Mint$/\1Start NapOS/' \
         "$isolinux_cfg"
-    sed -Ei 's#^desktop-image:.*$#desktop-image: "/isolinux/splash.png"#' "$grub_theme"
-    install -m 0644 "$splash_source" "$splash_target"
     grub_kernel_after=$(grep -E '^[[:space:]]*(linux|initrd)[[:space:]]' "$grub_cfg" | sha256sum)
     isolinux_kernel_after=$(grep -E '^[[:space:]]*(kernel|linux|append)[[:space:]]' \
         "$isolinux_cfg" | sha256sum)
@@ -231,7 +213,6 @@ brand_iso_boot_configuration() {
     grep -Fq 'menuentry "Start NapOS (compatibility mode)"' "$grub_cfg" || return 1
     grep -Fq 'menu label Start NapOS' "$isolinux_cfg" || return 1
     grep -Fq 'menu label Start NapOS in compatibility mode' "$isolinux_cfg" || return 1
-    grep -Fqx 'desktop-image: "/isolinux/splash.png"' "$grub_theme" || return 1
     ! grep -Fq 'Linux Mint' "$grub_cfg" || return 1
     ! grep -Fq 'Linux Mint' "$isolinux_cfg"
 }
@@ -1181,23 +1162,15 @@ install_packages_and_hooks() {
     TEMP_PATHS+=("$boot_branding_temp")
     cp "$ISO_TREE/boot/grub/grub.cfg" "$boot_branding_temp/grub.cfg"
     cp "$ISO_TREE/isolinux/live.cfg" "$boot_branding_temp/isolinux-live.cfg"
-    cp "$ISO_TREE/boot/grub/live-theme/theme.txt" "$boot_branding_temp/grub-theme.txt"
-    brand_iso_boot_configuration \
+    brand_iso_boot_labels \
         "$boot_branding_temp/grub.cfg" \
-        "$boot_branding_temp/isolinux-live.cfg" \
-        "$boot_branding_temp/grub-theme.txt" \
-        "$ROOTFS/usr/share/backgrounds/napos/napos-boot-splash.png" \
-        "$boot_branding_temp/splash.png" ||
+        "$boot_branding_temp/isolinux-live.cfg" ||
         die "Failed to brand the ISO boot menus without changing their boot arguments."
     sudo install -m 0644 -D "$ROOTFS/boot/initrd.img" "$ISO_TREE/casper/initrd.lz"
     sudo install -m 0644 "$boot_branding_temp/grub.cfg" \
         "$ISO_TREE/boot/grub/grub.cfg"
     sudo install -m 0644 "$boot_branding_temp/isolinux-live.cfg" \
         "$ISO_TREE/isolinux/live.cfg"
-    sudo install -m 0644 "$boot_branding_temp/grub-theme.txt" \
-        "$ISO_TREE/boot/grub/live-theme/theme.txt"
-    sudo install -m 0644 "$boot_branding_temp/splash.png" \
-        "$ISO_TREE/isolinux/splash.png"
 }
 
 validate_customized_rootfs() {
@@ -1247,7 +1220,6 @@ validate_customized_rootfs() {
             debconf-communicate -fnoninteractive ubiquity)" == "0 true" ]]
         grep -qx "LANG=en_US.UTF-8" /etc/default/locale
         [[ -f /usr/share/backgrounds/napos/napos-wallpaper.svg ]]
-        [[ -f /usr/share/backgrounds/napos/napos-boot-splash.png ]]
         [[ -f /usr/share/icons/hicolor/scalable/apps/napos-logo.svg ]]
         [[ -f /usr/share/plymouth/themes/napos-logo/napos-logo.plymouth ]]
         [[ -f /usr/share/plymouth/themes/napos-text/napos-text.plymouth ]]
@@ -1258,17 +1230,7 @@ validate_customized_rootfs() {
         grep -Fqx "GRUB_DISTRIBUTOR=\"Ubuntu\"" /etc/default/grub.d/99-napos-branding.cfg
         grep -Fqx "GRUB_VISIBLE_DISTRIBUTOR=\"NapOS\"" \
             /etc/default/grub.d/99-napos-branding.cfg
-        grep -Fqx "GRUB_BACKGROUND=\"/usr/share/backgrounds/napos/napos-boot-splash.png\"" \
-            /etc/default/grub.d/99-napos-branding.cfg
         grep -Fqx "GRUB_DISTRIBUTOR=\"Ubuntu\"" /etc/default/grub.d/50_linuxmint.cfg
-        grep -Eq "^background=.*/usr/share/backgrounds/napos/napos-wallpaper.svg" \
-            /usr/share/glib-2.0/schemas/99-napos-branding.gschema.override
-        grep -Eq "^logo=.*/usr/share/icons/hicolor/scalable/apps/napos-logo.svg" \
-            /usr/share/glib-2.0/schemas/99-napos-branding.gschema.override
-        grep -Fq "Welcome to NapOS" /usr/share/ubiquity-slideshow/slides/welcome.html
-        grep -Fq "Chào mừng bạn đến với NapOS" \
-            /usr/share/ubiquity-slideshow/slides/l10n/vi/welcome.html
-        ! dpkg-query -W -f="\${db:Status-Abbrev}" mintwelcome 2>/dev/null | grep -q "^ii"
         [[ -s /etc/dconf/db/local ]]
         [[ -f /usr/share/themes/Windows-10-Dark/index.theme ]]
         [[ -f /usr/share/themes/Windows-10-Dark/gtk-2.0/gtkrc ]]
@@ -1417,8 +1379,6 @@ validate_customized_rootfs() {
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     validate_cinnamon_desktop_defaults "$dconf_data" ||
         die "Cinnamon desktop icon defaults are incomplete or incorrect."
-    validate_cinnamon_branding_defaults "$dconf_data" ||
-        die "Cinnamon startup, System Info, or application-menu branding is incomplete."
     validate_cinnamon_copyq_defaults "$dconf_data" ||
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
     validate_cinnamon_theme_defaults "$dconf_data" ||
@@ -1685,9 +1645,7 @@ repack_iso() {
         -map "$ISO_TREE/casper/filesystem.manifest" /casper/filesystem.manifest \
         -map "$ISO_TREE/casper/initrd.lz" /casper/initrd.lz \
         -map "$ISO_TREE/boot/grub/grub.cfg" /boot/grub/grub.cfg \
-        -map "$ISO_TREE/boot/grub/live-theme/theme.txt" /boot/grub/live-theme/theme.txt \
         -map "$ISO_TREE/isolinux/live.cfg" /isolinux/live.cfg \
-        -map "$ISO_TREE/isolinux/splash.png" /isolinux/splash.png \
         -map "$ISO_TREE/md5sum.txt" /md5sum.txt \
         -boot_image any replay -commit -end
     mv -- "$tmp_output" "$output"
@@ -1719,9 +1677,7 @@ extract_verification_files() {
         -extract /casper/filesystem.manifest-remove "$temp/filesystem.manifest-remove" \
         -extract /casper/initrd.lz "$temp/initrd.lz" \
         -extract /boot/grub/grub.cfg "$temp/grub.cfg" \
-        -extract /boot/grub/live-theme/theme.txt "$temp/grub-theme.txt" \
-        -extract /isolinux/live.cfg "$temp/isolinux-live.cfg" \
-        -extract /isolinux/splash.png "$temp/boot-splash.png" >/dev/null 2>&1
+        -extract /isolinux/live.cfg "$temp/isolinux-live.cfg" >/dev/null 2>&1
 }
 
 read_installer_launcher() {
@@ -1741,7 +1697,7 @@ read_installer_launcher() {
 cmd_verify() {
     local iso temp boot_report pvd_report sidecar
     local package napos_release os_release timezone installer locale_data dconf_data
-    local squashfs_report compression expected_compression base_iso initrd_listing splash_metadata
+    local squashfs_report compression expected_compression base_iso initrd_listing
     local build_info chrome_source_file chrome_key_file chrome_key_fingerprint chrome_version
     local onlyoffice_version onlyoffice_launcher office_mime
     local lotus_source_file lotus_key_file lotus_key_fingerprint lotus_version
@@ -1749,9 +1705,8 @@ cmd_verify() {
     local copyq_autostart flameshot_autostart mimeapps mint_mimeapps grouped_window_list
     local panel_launchers menu_settings theme_index theme_file
     local application_defaults desktop_launcher desktop_listing installer_shortcut
-    local greeter_defaults grub_defaults slideshow_index slideshow_directory
-    local plymouth_default_alternative plymouth_text_alternative artwork_path artwork_metadata
-    local ubiquity_module_data grub_generator_path
+    local grub_defaults plymouth_default_alternative plymouth_text_alternative
+    local grub_generator_path
     iso=$(resolve_iso_argument "${1:-}")
     [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
     sidecar="${iso}.sha256"
@@ -1789,18 +1744,13 @@ cmd_verify() {
         grep -Fq 'hostname=mint' "$boot_config" || die "Compatible live hostname is missing."
         grep -Fq 'uuid=' "$boot_config" || die "Base-image UUID boot argument is missing."
     done
-    grep -Fqx 'desktop-image: "/isolinux/splash.png"' "$temp/grub-theme.txt" ||
-        die "GRUB theme does not select the NapOS boot splash."
-    splash_metadata=$(file "$temp/boot-splash.png")
-    [[ "$splash_metadata" == *"PNG image data, 640 x 480,"* ]] ||
-        die "NapOS boot splash is not a 640x480 PNG."
     initrd_listing=$(lsinitramfs "$temp/initrd.lz") || die "Unable to inspect the live initramfs."
     grep -Fq 'napos-logo' <<<"$initrd_listing" ||
         die "Live initramfs does not contain the NapOS Plymouth theme."
     if grep -Fq 'mint-logo' <<<"$initrd_listing"; then
         die "Live initramfs still contains the Mint Plymouth theme."
     fi
-    ok "BIOS and UEFI menus, boot splash, and live Plymouth branding are valid."
+    ok "BIOS and UEFI menu labels and live Plymouth branding are valid."
     [[ -s "$temp/filesystem.manifest-remove" ]] || die "filesystem.manifest-remove is missing or empty."
     squashfs_report=$(unsquashfs -s "$temp/filesystem.squashfs" 2>&1) || die "SquashFS superblock validation failed."
     compression=$(awk '$1 == "Compression" {print tolower($2); exit}' <<<"$squashfs_report")
@@ -1826,17 +1776,6 @@ cmd_verify() {
     locale_data=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/default/locale 2>/dev/null) || die "/etc/default/locale is missing."
     dconf_data=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local.d/00-napos 2>/dev/null) || die "NapOS dconf source is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local >/dev/null 2>&1 || die "Compiled NapOS dconf database is missing."
-    greeter_defaults=$(unsquashfs -cat "$temp/filesystem.squashfs" \
-        usr/share/glib-2.0/schemas/99-napos-branding.gschema.override 2>/dev/null) ||
-        die "NapOS Slick Greeter defaults are missing."
-    grep -Fqx "background='/usr/share/backgrounds/napos/napos-wallpaper.svg'" \
-        <<<"$greeter_defaults" || die "Slick Greeter background is not NapOS."
-    grep -Fqx "logo='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'" \
-        <<<"$greeter_defaults" || die "Slick Greeter logo is not NapOS."
-    grep -Fqx "other-monitors-logo='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'" \
-        <<<"$greeter_defaults" || die "Slick Greeter secondary-monitor logo is not NapOS."
-    grep -Fqx 'stretch-background-across-monitors=false' <<<"$greeter_defaults" ||
-        die "Slick Greeter does not replicate the NapOS background on each monitor."
     grub_defaults=$(unsquashfs -cat "$temp/filesystem.squashfs" \
         etc/default/grub.d/99-napos-branding.cfg 2>/dev/null) ||
         die "Installed-GRUB NapOS override is missing."
@@ -1844,8 +1783,6 @@ cmd_verify() {
         die "Installed GRUB distributor is not visibly branded NapOS."
     grep -Fqx 'GRUB_DISTRIBUTOR="Ubuntu"' <<<"$grub_defaults" ||
         die "Installed GRUB does not preserve the compatible Ubuntu EFI ID."
-    grep -Fqx 'GRUB_BACKGROUND="/usr/share/backgrounds/napos/napos-boot-splash.png"' \
-        <<<"$grub_defaults" || die "Installed GRUB background is not NapOS."
     for grub_generator_path in \
         etc/grub.d/10_linux \
         etc/grub.d/10_linux_zfs \
@@ -1878,66 +1815,6 @@ cmd_verify() {
         grep -Fq 'napos-logo/napos-logo.plymouth' || die "NapOS graphical Plymouth theme is not selected."
     unsquashfs -ll "$temp/filesystem.squashfs" etc/alternatives/text.plymouth 2>/dev/null |
         grep -Fq 'napos-text/napos-text.plymouth' || die "NapOS text Plymouth theme is not selected."
-    slideshow_index=$(unsquashfs -cat "$temp/filesystem.squashfs" \
-        usr/share/ubiquity-slideshow/slides/index.html 2>/dev/null) ||
-        die "NapOS installer slideshow index is missing."
-    slideshow_directory=$(unsquashfs -cat "$temp/filesystem.squashfs" \
-        usr/share/ubiquity-slideshow/slides/directory.jsonp 2>/dev/null) ||
-        die "NapOS installer slideshow locale map is missing."
-    [[ "$(grep -Fc '<div><a href=' <<<"$slideshow_index")" == 2 ]] ||
-        die "Installer slideshow does not expose exactly two slides."
-    grep -Fq '<div><a href="welcome.html"></a></div>' <<<"$slideshow_index" ||
-        die "NapOS installer welcome slide is not exposed."
-    grep -Fq '<div><a href="applications.html"></a></div>' <<<"$slideshow_index" ||
-        die "NapOS applications slide is not exposed."
-    [[ "$slideshow_directory" == \
-        'ubiquitySlideshowDirectoryCb({"vi":{"slides":["welcome.html","applications.html"],"media":[]}});' ]] ||
-        die "Installer slideshow localization does not restrict overrides to Vietnamese."
-    for slide_path in \
-        usr/share/ubiquity-slideshow/slides/welcome.html \
-        usr/share/ubiquity-slideshow/slides/applications.html \
-        usr/share/ubiquity-slideshow/slides/l10n/vi/welcome.html \
-        usr/share/ubiquity-slideshow/slides/l10n/vi/applications.html; do
-        unsquashfs -cat "$temp/filesystem.squashfs" "$slide_path" >/dev/null 2>&1 ||
-            die "Required NapOS installer slide is missing: $slide_path"
-    done
-    for artwork_path in \
-        usr/share/plymouth/themes/napos-logo/napos-logo.png:128x128 \
-        usr/share/backgrounds/napos/napos-boot-splash.png:640x480 \
-        usr/share/ubiquity/pixmaps/ubuntu/logo.png:454x90 \
-        usr/share/ubiquity/pixmaps/ubuntu_installed.png:234x165 \
-        usr/share/ubiquity-slideshow/slides/screenshots/welcome.png:448x305 \
-        usr/share/ubiquity-slideshow/slides/screenshots/applications.png:448x305; do
-        artwork_metadata=${artwork_path##*:}
-        artwork_path=${artwork_path%%:*}
-        unsquashfs -cat "$temp/filesystem.squashfs" "$artwork_path" \
-            >"$temp/installer-artwork.png" 2>/dev/null ||
-            die "NapOS installer artwork is missing: $artwork_path"
-        file "$temp/installer-artwork.png" | grep -Fq "${artwork_metadata/x/ x }," ||
-            die "NapOS installer artwork has unexpected dimensions: $artwork_path"
-    done
-    for artwork_path in \
-        usr/lib/ubiquity/ubiquity/gtkwidgets.py \
-        usr/lib/ubiquity/plugins/ubi-partman.py; do
-        ubiquity_module_data=$(unsquashfs -cat "$temp/filesystem.squashfs" \
-            "$artwork_path" 2>/dev/null) || die "Ubiquity module is missing: $artwork_path"
-        grep -Fq "'napos-logo'" <<<"$ubiquity_module_data" ||
-            die "Ubiquity module does not select NapOS artwork: $artwork_path"
-        ! grep -Fq "'distributor-logo'" <<<"$ubiquity_module_data" ||
-            die "Ubiquity module still selects distributor-logo: $artwork_path"
-    done
-    if unsquashfs -cat "$temp/filesystem.squashfs" \
-        etc/xdg/autostart/mintwelcome.desktop >/dev/null 2>&1; then
-        die "Mint Welcome autostart entry remains."
-    fi
-    if unsquashfs -cat "$temp/filesystem.squashfs" \
-        usr/share/applications/mintwelcome.desktop >/dev/null 2>&1; then
-        die "Mint Welcome launcher remains."
-    fi
-    if unsquashfs -ll "$temp/filesystem.squashfs" usr/bin/mintwelcome 2>/dev/null |
-        grep -q 'usr/bin/mintwelcome'; then
-        die "Mint Welcome executable remains."
-    fi
     installer=$(read_installer_launcher "$temp/filesystem.squashfs") ||
         die "No supported installer launcher exists in the SquashFS."
     chrome_source_file="$temp/google-chrome.sources"
@@ -2179,8 +2056,6 @@ cmd_verify() {
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     validate_cinnamon_desktop_defaults "$dconf_data" ||
         die "Cinnamon desktop icon defaults are incomplete or incorrect."
-    validate_cinnamon_branding_defaults "$dconf_data" ||
-        die "Cinnamon startup, System Info, or application-menu branding is incomplete."
     validate_cinnamon_copyq_defaults "$dconf_data" ||
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
     validate_cinnamon_theme_defaults "$dconf_data" ||

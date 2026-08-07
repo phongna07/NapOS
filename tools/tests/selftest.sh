@@ -787,7 +787,6 @@ libuno-purpenvhelpergcc3-3t64
 libuno-sal3t64
 libuno-salhelpergcc3-3t64
 mintchat
-mintwelcome
 python3-uno
 uno-libs-private
 ure
@@ -807,12 +806,12 @@ if [[ "$(package_remove_list_hash)" == "$expected_remove_hash" ]]; then
 else
     fail "Package removal profile hash is stable"
 fi
-if grep -qx 'mintwelcome' "$PROJECT_ROOT/config/packages-remove.txt" &&
-    grep -Fq 'Mint Welcome autostart entry remains' "$PROJECT_ROOT/tools/napos-build" &&
-    grep -Fq 'Mint Welcome launcher remains' "$PROJECT_ROOT/tools/napos-build"; then
-    pass "Mint Welcome is purged and rejected from verified images"
+if ! grep -qx 'mintwelcome' "$PROJECT_ROOT/config/packages-remove.txt" &&
+    ! grep -Fq 'Mint Welcome autostart entry remains' "$PROJECT_ROOT/tools/napos-build" &&
+    ! grep -Fq 'Mint Welcome launcher remains' "$PROJECT_ROOT/tools/napos-build"; then
+    pass "Mint Welcome remains inherited from the base image"
 else
-    fail "Mint Welcome is purged and rejected from verified images"
+    fail "Mint Welcome remains inherited from the base image"
 fi
 
 install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
@@ -928,8 +927,6 @@ eval "$(sed -n '/^validate_cinnamon_panel_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_desktop_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
-eval "$(sed -n '/^validate_cinnamon_branding_defaults()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_menu_icon_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 eval "$(sed -n '/^validate_cinnamon_launcher_defaults()/,/^}/p' \
@@ -961,11 +958,11 @@ expect_success "Cinnamon defaults enable Computer, Home, Trash, and mounted driv
 missing_desktop_icon=${dconf_defaults/home-icon-visible=true/home-icon-visible=false}
 expect_failure "Cinnamon defaults reject a disabled desktop icon" \
     validate_cinnamon_desktop_defaults "$missing_desktop_icon"
-expect_success "Cinnamon startup, System Info, and application menu use NapOS artwork" \
-    validate_cinnamon_branding_defaults "$dconf_defaults"
-mint_cinnamon_branding=${dconf_defaults/system-icon=\'/system-icon=\'linuxmint-logo-ring-symbolic}
-expect_failure "Cinnamon branding rejects a Mint System Info icon" \
-    validate_cinnamon_branding_defaults "$mint_cinnamon_branding"
+if ! grep -Eq '^(startup-icon-name|system-icon|app-menu-icon-name)=' <<<"$dconf_defaults"; then
+    pass "Cinnamon-wide branding remains inherited from the base image"
+else
+    fail "Cinnamon-wide branding remains inherited from the base image"
+fi
 expect_success "Cinnamon defaults bind Super+V to the CopyQ history toggle" \
     validate_cinnamon_copyq_defaults "$dconf_defaults"
 invalid_copyq_defaults=${dconf_defaults//<Super>v/<Super>x}
@@ -1143,7 +1140,7 @@ else
     fail "Wallpaper is a non-empty 4K SVG asset"
 fi
 
-eval "$(sed -n '/^brand_iso_boot_configuration()/,/^}/p' \
+eval "$(sed -n '/^brand_iso_boot_labels()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")"
 boot_fixture="$safe_root/boot-branding"
 mkdir -p "$boot_fixture"
@@ -1168,12 +1165,8 @@ label compat
     linux /casper/vmlinuz
     append boot=casper initrd=/casper/initrd.lz uuid=test-uuid username=mint hostname=mint noapic nomodeset --
 EOF
-printf 'desktop-image: "/isolinux/splash800x600.png"\n' >"$boot_fixture/theme.txt"
 expect_success "Boot-label rewriting brands GRUB and ISOLINUX without changing boot arguments" \
-    brand_iso_boot_configuration \
-    "$boot_fixture/grub.cfg" "$boot_fixture/live.cfg" "$boot_fixture/theme.txt" \
-    "$PROJECT_ROOT/config/overlay/usr/share/backgrounds/napos/napos-boot-splash.png" \
-    "$boot_fixture/splash.png"
+    brand_iso_boot_labels "$boot_fixture/grub.cfg" "$boot_fixture/live.cfg"
 if grep -Fq 'boot=casper uuid=test-uuid username=mint hostname=mint' \
     "$boot_fixture/grub.cfg" "$boot_fixture/live.cfg" &&
     grep -Fq 'menuentry "Start NapOS (compatibility mode)"' "$boot_fixture/grub.cfg" &&
@@ -1185,10 +1178,7 @@ fi
 cp "$boot_fixture/grub.cfg" "$boot_fixture/invalid-grub.cfg"
 sed -i 's/Start NapOS/Start Other OS/g' "$boot_fixture/invalid-grub.cfg"
 expect_failure "Boot-label rewriting rejects an input without the expected Mint entries" \
-    brand_iso_boot_configuration \
-    "$boot_fixture/invalid-grub.cfg" "$boot_fixture/live.cfg" "$boot_fixture/theme.txt" \
-    "$PROJECT_ROOT/config/overlay/usr/share/backgrounds/napos/napos-boot-splash.png" \
-    "$boot_fixture/invalid-splash.png"
+    brand_iso_boot_labels "$boot_fixture/invalid-grub.cfg" "$boot_fixture/live.cfg"
 
 install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' \
     "$PROJECT_ROOT/tools/napos-build")
@@ -1197,31 +1187,33 @@ if grep -Fq 'boot_branding_temp=$(with_temp_dir)' <<<"$install_function" &&
     grep -Fq '"$boot_branding_temp/grub.cfg"' <<<"$install_function" &&
     grep -Fq 'sudo install -m 0644 "$boot_branding_temp/grub.cfg"' \
         <<<"$install_function" &&
-    grep -Fq 'sudo install -m 0644 "$boot_branding_temp/splash.png"' \
+    grep -Fq 'sudo install -m 0644 "$boot_branding_temp/isolinux-live.cfg"' \
         <<<"$install_function" &&
+    ! grep -Fq 'grub-theme.txt' <<<"$install_function" &&
+    ! grep -Fq 'splash.png' <<<"$install_function" &&
     ! grep -Fq 'chmod u+w' <<<"$install_function"; then
-    pass "ISO boot branding uses writable staging before privileged installation"
+    pass "ISO boot-label branding stages only GRUB and ISOLINUX configuration"
 else
-    fail "ISO boot branding uses writable staging before privileged installation"
+    fail "ISO boot-label branding stages only GRUB and ISOLINUX configuration"
 fi
 
 repack_function=$(sed -n '/^repack_iso()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
 required_iso_mappings=(
     '/casper/initrd.lz'
     '/boot/grub/grub.cfg'
-    '/boot/grub/live-theme/theme.txt'
     '/isolinux/live.cfg'
-    '/isolinux/splash.png'
 )
 mapping_complete=true
 for required_mapping in "${required_iso_mappings[@]}"; do
     grep -Fq -- "-map \"\$ISO_TREE${required_mapping}\" ${required_mapping}" \
         <<<"$repack_function" || mapping_complete=false
 done
-if [[ "$mapping_complete" == true ]]; then
-    pass "ISO repack maps the rebuilt initramfs and all branded BIOS/UEFI files"
+if [[ "$mapping_complete" == true ]] &&
+    ! grep -Fq '/boot/grub/live-theme/theme.txt' <<<"$repack_function" &&
+    ! grep -Fq '/isolinux/splash.png' <<<"$repack_function"; then
+    pass "ISO repack maps only the rebuilt initramfs and branded menu labels"
 else
-    fail "ISO repack maps the rebuilt initramfs and all branded BIOS/UEFI files"
+    fail "ISO repack maps only the rebuilt initramfs and branded menu labels"
 fi
 
 plymouth_hook=$(<"$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")
@@ -1246,46 +1238,55 @@ assert_png_dimensions() {
 }
 expect_success "Plymouth logo is a 128x128 RGBA PNG" assert_png_dimensions \
     "$PROJECT_ROOT/config/overlay/usr/share/plymouth/themes/napos-logo/napos-logo.png" 128x128
-expect_success "BIOS/UEFI and installed-GRUB splash is a 640x480 PNG" assert_png_dimensions \
-    "$PROJECT_ROOT/config/overlay/usr/share/backgrounds/napos/napos-boot-splash.png" 640x480
-expect_success "Ubiquity header has its required 454x90 dimensions" assert_png_dimensions \
-    "$PROJECT_ROOT/config/overlay/usr/share/ubiquity/pixmaps/ubuntu/logo.png" 454x90
-expect_success "Ubiquity installed illustration has its required 234x165 dimensions" \
-    assert_png_dimensions \
-    "$PROJECT_ROOT/config/overlay/usr/share/ubiquity/pixmaps/ubuntu_installed.png" 234x165
 
-greeter_defaults="$PROJECT_ROOT/config/overlay/usr/share/glib-2.0/schemas/99-napos-branding.gschema.override"
 grub_defaults="$PROJECT_ROOT/config/overlay/etc/default/grub.d/99-napos-branding.cfg"
-if grep -Fqx "background='/usr/share/backgrounds/napos/napos-wallpaper.svg'" \
-    "$greeter_defaults" &&
-    grep -Fqx "logo='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'" \
-        "$greeter_defaults" &&
-    grep -Fqx "other-monitors-logo='/usr/share/icons/hicolor/scalable/apps/napos-logo.svg'" \
-        "$greeter_defaults" &&
-    grep -Fqx 'GRUB_DISTRIBUTOR="Ubuntu"' "$grub_defaults" &&
+if grep -Fqx 'GRUB_DISTRIBUTOR="Ubuntu"' "$grub_defaults" &&
     grep -Fqx 'GRUB_VISIBLE_DISTRIBUTOR="NapOS"' "$grub_defaults" &&
-    grep -Fqx 'GRUB_BACKGROUND="/usr/share/backgrounds/napos/napos-boot-splash.png"' \
-        "$grub_defaults" &&
+    ! grep -Fq 'GRUB_BACKGROUND=' "$grub_defaults" &&
     grep -Fq "grep -Fqx '. /etc/default/grub.d/99-napos-branding.cfg'" \
         "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
-    pass "Slick Greeter and installed GRUB select NapOS artwork with the compatible EFI ID"
+    pass "Installed GRUB uses NapOS labels with the compatible EFI ID and base background"
 else
-    fail "Slick Greeter and installed GRUB select NapOS artwork with the compatible EFI ID"
+    fail "Installed GRUB uses NapOS labels with the compatible EFI ID and base background"
 fi
 
-slideshow_root="$PROJECT_ROOT/config/overlay/usr/share/ubiquity-slideshow/slides"
-expected_slideshow_directory='ubiquitySlideshowDirectoryCb({"vi":{"slides":["welcome.html","applications.html"],"media":[]}});'
-if [[ "$(<"$slideshow_root/directory.jsonp")" == "$expected_slideshow_directory" ]] &&
-    [[ "$(grep -Fc '<div><a href=' "$slideshow_root/index.html")" == 2 ]] &&
-    grep -Fq 'Welcome to NapOS' "$slideshow_root/welcome.html" &&
-    grep -Fq 'Chào mừng bạn đến với NapOS' "$slideshow_root/l10n/vi/welcome.html" &&
-    ! grep -Fq 'Linux Mint' \
-        "$slideshow_root/index.html" "$slideshow_root/welcome.html" \
-        "$slideshow_root/applications.html" "$slideshow_root/l10n/vi/welcome.html" \
-        "$slideshow_root/l10n/vi/applications.html"; then
-    pass "Installer exposes two NapOS slides with Vietnamese overrides and English fallback"
+if [[ ! -e "$PROJECT_ROOT/config/overlay/usr/share/glib-2.0/schemas/99-napos-branding.gschema.override" ]] &&
+    ! grep -Fq 'glib-compile-schemas' "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+    pass "Slick Greeter branding remains inherited from the base image"
 else
-    fail "Installer exposes two NapOS slides with Vietnamese overrides and English fallback"
+    fail "Slick Greeter branding remains inherited from the base image"
+fi
+
+ubiquity_overlays=(
+    config/overlay/usr/share/icons/hicolor/scalable/apps/napos-logo.png
+    config/overlay/usr/share/ubiquity-slideshow/slides/applications.html
+    config/overlay/usr/share/ubiquity-slideshow/slides/directory.jsonp
+    config/overlay/usr/share/ubiquity-slideshow/slides/index.html
+    config/overlay/usr/share/ubiquity-slideshow/slides/l10n/vi/applications.html
+    config/overlay/usr/share/ubiquity-slideshow/slides/l10n/vi/welcome.html
+    config/overlay/usr/share/ubiquity-slideshow/slides/screenshots/applications.png
+    config/overlay/usr/share/ubiquity-slideshow/slides/screenshots/welcome.png
+    config/overlay/usr/share/ubiquity-slideshow/slides/welcome.html
+    config/overlay/usr/share/ubiquity/pixmaps/ubuntu/logo.png
+    config/overlay/usr/share/ubiquity/pixmaps/ubuntu_installed.png
+)
+ubiquity_overlays_absent=true
+for ubiquity_overlay in "${ubiquity_overlays[@]}"; do
+    [[ ! -e "$PROJECT_ROOT/$ubiquity_overlay" ]] || ubiquity_overlays_absent=false
+done
+if [[ "$ubiquity_overlays_absent" == true ]] &&
+    ! grep -Fq 'Branding Ubiquity artwork' "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+    pass "Ubiquity artwork and slides remain inherited from the base image"
+else
+    fail "Ubiquity artwork and slides remain inherited from the base image"
+fi
+
+if [[ ! -e "$PROJECT_ROOT/config/overlay/usr/share/backgrounds/napos/napos-boot-splash.png" ]] &&
+    ! grep -Fq 'GRUB_BACKGROUND=' "$grub_defaults" &&
+    ! grep -Fq 'napos-boot-splash' "$PROJECT_ROOT/tools/napos-build"; then
+    pass "GRUB and ISOLINUX backgrounds remain inherited from the base image"
+else
+    fail "GRUB and ISOLINUX backgrounds remain inherited from the base image"
 fi
 
 verify_extract_function=$(sed -n '/^extract_verification_files()/,/^}/p' \
@@ -1294,11 +1295,13 @@ verify_extract_function=$(sed -n '/^extract_verification_files()/,/^}/p' \
 if grep -Fq -- '-extract /casper/initrd.lz' <<<"$verify_extract_function" &&
     grep -Fq -- '-extract /boot/grub/grub.cfg' <<<"$verify_extract_function" &&
     grep -Fq -- '-extract /isolinux/live.cfg' <<<"$verify_extract_function" &&
+    ! grep -Fq -- '-extract /boot/grub/live-theme/theme.txt' <<<"$verify_extract_function" &&
+    ! grep -Fq -- '-extract /isolinux/splash.png' <<<"$verify_extract_function" &&
     grep -Fq 'lsinitramfs "$temp/initrd.lz"' "$PROJECT_ROOT/tools/napos-build" &&
     grep -Fq 'initramfs-tools-core' "$PROJECT_ROOT/.github/workflows/release.yml"; then
-    pass "Verification and release dependencies inspect branded boot files and initramfs"
+    pass "Verification inspects only branded labels and Plymouth initramfs content"
 else
-    fail "Verification and release dependencies inspect branded boot files and initramfs"
+    fail "Verification inspects only branded labels and Plymouth initramfs content"
 fi
 
 if rg -n --fixed-strings '0.1.0' "$PROJECT_ROOT/tools/napos-build" >/dev/null; then
