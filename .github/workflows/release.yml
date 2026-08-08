@@ -66,15 +66,60 @@ jobs:
       - name: Build and verify release ISO
         run: make release
 
-      - name: Upload verified release artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: vnmint-${{ steps.build-config.outputs.version }}-release-${{ github.run_number }}
-          path: |
-            dist/${{ steps.build-config.outputs.artifact_base }}.iso
-            dist/${{ steps.build-config.outputs.artifact_base }}.iso.sha256
-            dist/${{ steps.build-config.outputs.artifact_base }}.build-info.json
-            dist/build-release.log
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+      - name: Publish release to SourceForge
+        shell: bash
+        env:
+          SOURCEFORGE_USERNAME: ${{ vars.SOURCEFORGE_USERNAME }}
+          SOURCEFORGE_PROJECT: ${{ vars.SOURCEFORGE_PROJECT }}
+          SOURCEFORGE_KNOWN_HOSTS: ${{ vars.SOURCEFORGE_KNOWN_HOSTS }}
+          SOURCEFORGE_SSH_PRIVATE_KEY: ${{ secrets.SOURCEFORGE_SSH_PRIVATE_KEY }}
+          RELEASE_VERSION: ${{ steps.build-config.outputs.version }}
+          ARTIFACT_BASE: ${{ steps.build-config.outputs.artifact_base }}
+        run: |
+          set -Eeuo pipefail
+
+          [[ -n "$SOURCEFORGE_USERNAME" ]]
+          [[ -n "$SOURCEFORGE_PROJECT" ]]
+          [[ -n "$SOURCEFORGE_KNOWN_HOSTS" ]]
+          [[ -n "$SOURCEFORGE_SSH_PRIVATE_KEY" ]]
+
+          install -d -m 700 -- "$HOME/.ssh"
+
+          key_path="$HOME/.ssh/sourceforge_actions"
+          known_hosts_path="$HOME/.ssh/known_hosts"
+
+          printf '%s\n' "$SOURCEFORGE_SSH_PRIVATE_KEY" >"$key_path"
+          printf '%s\n' "$SOURCEFORGE_KNOWN_HOSTS" >"$known_hosts_path"
+          chmod 600 -- "$key_path" "$known_hosts_path"
+
+          trap 'rm -f -- "$key_path"' EXIT
+
+          remote_host="${SOURCEFORGE_USERNAME}@frs.sourceforge.net"
+          remote_dir="/home/frs/project/${SOURCEFORGE_PROJECT}/${RELEASE_VERSION}"
+
+          printf -- '-mkdir %s\nquit\n' "$remote_dir" |
+              sftp \
+                  -b - \
+                  -i "$key_path" \
+                  -o BatchMode=yes \
+                  -o IdentitiesOnly=yes \
+                  -o StrictHostKeyChecking=yes \
+                  -o UserKnownHostsFile="$known_hosts_path" \
+                  "$remote_host"
+
+          export RSYNC_RSH="ssh -i $key_path \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=$known_hosts_path"
+
+          rsync \
+              --archive \
+              --verbose \
+              --partial \
+              --progress \
+              -- \
+              "dist/${ARTIFACT_BASE}.iso" \
+              "dist/${ARTIFACT_BASE}.iso.sha256" \
+              "dist/${ARTIFACT_BASE}.build-info.json" \
+              "${remote_host}:${remote_dir}/"

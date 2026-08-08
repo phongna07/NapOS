@@ -28,7 +28,7 @@ nhận diện của Linux Mint 22.3 Cinnamon.
 - **Nguồn gốc có thể kiểm tra.** ISO nền Linux Mint và các gói bên thứ ba được
   xác thực bằng chữ ký, fingerprint và checksum đã ghim trước khi build.
 
-**[Tải ảnh cài đặt từ GitHub Releases →](https://github.com/phongna07/vnmint/releases)**
+**[Tải file ISO cài đặt mới nhất từ SourceForge →](https://sourceforge.net/projects/vnmint/files/latest/download)**
 
 ## Familiar Linux Mint, useful from the first boot
 
@@ -51,7 +51,7 @@ remains available whenever you are ready to install.
 ## Download
 
 Images are published on the
-**[vnmint Releases page](https://github.com/phongna07/vnmint/releases)**. The
+**[Download vnmint ISO from SourceForge](https://sourceforge.net/projects/vnmint/files/latest/download)**. The
 current build targets 64-bit PCs (`amd64`). Back up important files before
 installing any operating system.
 
