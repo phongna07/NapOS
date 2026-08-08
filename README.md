@@ -4,31 +4,25 @@
 
 ![Linux Mint desktop preview](public/vnmint-preview.png)
 
-## Linux Mint sẵn sàng cho người dùng Việt Nam
+## Linux Mint dành cho người dùng Việt Nam
 
-`vnmint` là tên của quy trình build và tệp ISO tùy chỉnh. Hệ điều hành trong
-ảnh cài đặt vẫn giữ nguyên tên, biểu tượng, hình nền, trình cài đặt và giao diện
-nhận diện của Linux Mint 22.3 Cinnamon.
+`vnmint` là tên của một hệ điều hành linux tuỳ chỉnh. Hệ điều hành gốc vẫn giữ nguyên tên, biểu tượng, hình nền và giao diện nhận diện của Linux Mint 22.3 Cinnamon.
 
-Ảnh cài đặt bổ sung các ứng dụng và thiết lập thực tế để người dùng Việt Nam,
-đặc biệt là người mới làm quen với Linux, có thể bắt đầu nhanh hơn:
+File ISO bổ sung các ứng dụng và thiết lập thực tế để người dùng Việt Nam, đặc biệt là người mới làm quen với Linux, có thể bắt đầu nhanh hơn:
 
 - **Sẵn sàng gõ tiếng Việt.** Fcitx5 Lotus được cài đặt và cấu hình sẵn với
-  bàn phím tiếng Anh đứng trước bộ gõ Lotus.
-- **Giao diện làm việc thuận tiện.** Thanh tác vụ được căn giữa, giao diện ứng
+  bàn phím tiếng Anh đứng trước bộ gõ Lotus. (Chuyển đổi giữa tiếng Việt và tiếng Anh bằng tổ hợp phím Ctrl + Space)
+- **Giao diện làm việc thuận tiện.** Thanh taskbar được căn giữa, giao diện ứng
   dụng Windows 10 Dark, con trỏ Yaru và các biểu tượng desktop hữu ích được cấu
-  hình sẵn, trong khi nhận diện Linux Mint vẫn được giữ nguyên.
-- **Cài đặt nhanh từ môi trường live.** Biểu tượng **Install Linux Mint** nằm ở
-  vị trí đầu tiên trên desktop và trình cài đặt tiêu chuẩn tự mở sau khi phiên
-  Cinnamon live khởi động. Có thể đóng trình cài đặt để tiếp tục dùng thử.
+  hình sẵn.
 - **Ứng dụng thiết yếu.** Google Chrome, ONLYOFFICE, VLC, Flameshot và CopyQ
   được cài đặt cùng các thiết lập mặc định phù hợp.
 - **Phông chữ quen thuộc.** Bộ phông chữ Microsoft thông dụng giúp tài liệu giữ
   hình thức nhất quán hơn khi trao đổi với người dùng Windows.
-- **Nguồn gốc có thể kiểm tra.** ISO nền Linux Mint và các gói bên thứ ba được
+- **Nguồn gốc uy tín.** Distro gốc Linux Mint và các gói bên thứ ba được
   xác thực bằng chữ ký, fingerprint và checksum đã ghim trước khi build.
 
-**[Tải file ISO cài đặt mới nhất từ SourceForge →](https://sourceforge.net/projects/vnmint/files/latest/download)**
+**[Tải file ISO cài đặt mới nhất từ SourceForge →](https://sourceforge.net/projects/vnmint/)**
 
 ## Familiar Linux Mint, useful from the first boot
 
@@ -51,7 +45,7 @@ remains available whenever you are ready to install.
 ## Download
 
 Images are published on the
-**[Download vnmint ISO from SourceForge](https://sourceforge.net/projects/vnmint/files/latest/download)**. The
+**[Download vnmint ISO from SourceForge](https://sourceforge.net/projects/vnmint/)**. The
 current build targets 64-bit PCs (`amd64`). Back up important files before
 installing any operating system.
 
@@ -62,11 +56,9 @@ policy, desktop configuration, and non-networked test suite.
 
 ```bash
 make help
-make test
 ```
 
-`make help` lists the supported commands. `make test` runs routine validation
-without root access or a network connection. See the
+`make help` lists the supported commands. See the
 [contributor build guide](docs/building.md) for native Ubuntu and WSL2 host
 requirements and complete ISO build commands.
 
