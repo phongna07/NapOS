@@ -1,7 +1,7 @@
-# Building NapOS
+# Building the vnmint Linux Mint image
 
-NapOS ISO builds are supported on Ubuntu `amd64`, either installed natively or
-running under WSL2. Ubuntu 24.04 is the reference host exercised by GitHub
+The vnmint build workflow is supported on Ubuntu `amd64`, either installed
+natively or running under WSL2. Ubuntu 24.04 is the reference host exercised by GitHub
 Actions; other Ubuntu releases are accepted when they pass the same capability
 checks. Ubuntu derivatives, other Linux distributions, WSL1, and non-`amd64`
 hosts are not supported.
@@ -15,7 +15,7 @@ below `/mnt` is valid on native Ubuntu. Windows, NTFS, FAT, network, and other
 metadata-incompatible filesystems are rejected.
 
 On WSL2, keep the repository in the distribution filesystem, such as
-`~/napos`, rather than on a Windows drive such as `/mnt/c`. Confirm that the
+`~/vnmint`, rather than on a Windows drive such as `/mnt/c`. Confirm that the
 distribution uses WSL version 2 from PowerShell:
 
 ```powershell
@@ -41,7 +41,7 @@ Clone the repository onto the supported Linux filesystem, then validate the
 host before building:
 
 ```bash
-cd ~/napos
+cd ~/vnmint
 make doctor
 make dev
 ```
@@ -64,8 +64,8 @@ limit. That optimization is selected only when `GITHUB_ACTIONS=true`.
 
 - `make fetch` authenticates and caches the pinned base ISO and third-party
   inputs without starting a complete build.
-- `make verify ISO=dist/NapOS-...iso` verifies an existing image.
-- `make inspect ISO=dist/NapOS-...iso` prints image metadata.
+- `make verify ISO=dist/vnmint-...iso` verifies an existing image.
+- `make inspect ISO=dist/vnmint-...iso` prints image metadata.
 - `make clean-work` removes disposable build state while retaining downloads
   and the expanded base cache.
 - `make clean-cache` also removes authenticated downloads and base caches.
@@ -73,15 +73,19 @@ limit. That optimization is selected only when `GITHUB_ACTIONS=true`.
 Development builds write these files below `dist/`:
 
 ```text
-NapOS-<version>-dev-cinnamon-amd64.iso
-NapOS-<version>-dev-cinnamon-amd64.iso.sha256
-NapOS-<version>-dev-cinnamon-amd64.build-info.json
+vnmint-<version>-dev-cinnamon-amd64.iso
+vnmint-<version>-dev-cinnamon-amd64.iso.sha256
+vnmint-<version>-dev-cinnamon-amd64.build-info.json
 build-dev.log
 ```
 
 Release builds use the same names without the `-dev` suffix and write
 `build-release.log`. Builds are not byte-reproducible because package versions
 are resolved from live upstream repositories.
+
+The `vnmint` prefix identifies generated artifacts only. The ISO volume ID,
+live boot menus, installer, desktop artwork, Plymouth splash, and installed
+operating-system identity remain Linux Mint.
 
 Full local builds require interactive sudo authentication, mounts, networking,
 and chroot operations. Agents and other non-interactive environments should use

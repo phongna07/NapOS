@@ -28,7 +28,7 @@ source /etc/os-release
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/remix.conf"
 
-printf '[NapOS] Disk space before reclaiming runner-only tools:\n'
+printf '[vnmint] Disk space before reclaiming runner-only tools:\n'
 df -h "$PROJECT_ROOT"
 
 unused_paths=(
@@ -44,7 +44,7 @@ unused_paths=(
 
 for path in "${unused_paths[@]}"; do
     [[ -e "$path" || -L "$path" ]] || continue
-    printf '[NapOS] Removing unused hosted-runner path: %s\n' "$path"
+    printf '[vnmint] Removing unused hosted-runner path: %s\n' "$path"
     sudo rm -rf -- "$path"
 done
 
@@ -56,7 +56,7 @@ sudo apt-get clean
 available_kib=$(df -Pk "$PROJECT_ROOT" | awk 'NR == 2 { print $4 }')
 required_kib=$((MIN_FREE_GIB * 1024 * 1024))
 
-printf '[NapOS] Disk space after reclaiming runner-only tools:\n'
+printf '[vnmint] Disk space after reclaiming runner-only tools:\n'
 df -h "$PROJECT_ROOT"
 
 (( available_kib >= required_kib )) || {

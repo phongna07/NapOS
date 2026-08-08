@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 
 COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${NAPOS_PROJECT_ROOT:-$(cd "$COMMON_DIR/../.." && pwd)}"
+PROJECT_ROOT="${VNMINT_PROJECT_ROOT:-$(cd "$COMMON_DIR/../.." && pwd)}"
 
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/remix.conf"
@@ -48,7 +48,7 @@ else
     COLOR_RESET=""
 fi
 
-log() { printf '%s[NapOS]%s %s\n' "$COLOR_BLUE" "$COLOR_RESET" "$*"; }
+log() { printf '%s[vnmint]%s %s\n' "$COLOR_BLUE" "$COLOR_RESET" "$*"; }
 ok() { printf '%s[  OK  ]%s %s\n' "$COLOR_GREEN" "$COLOR_RESET" "$*"; }
 warn() { printf '%s[ WARN ]%s %s\n' "$COLOR_YELLOW" "$COLOR_RESET" "$*" >&2; }
 die() { printf '%s[ERROR ]%s %s\n' "$COLOR_RED" "$COLOR_RESET" "$*" >&2; exit 1; }
@@ -66,11 +66,9 @@ trim_fingerprint() {
 }
 
 validate_config() {
-    [[ "$NAPOS_NAME" == "NapOS" ]] || die 'NAPOS_NAME must be exactly "NapOS".'
-    [[ "$NAPOS_ID" == "napos" ]] || die 'NAPOS_ID must be exactly "napos".'
-    [[ "$NAPOS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Invalid NAPOS_VERSION: $NAPOS_VERSION"
-    [[ "$ISO_VOLUME_ID" =~ ^[A-Z0-9_]+$ ]] || die "ISO_VOLUME_ID must contain only A-Z, 0-9, and underscore."
-    (( ${#ISO_VOLUME_ID} <= 32 )) || die "ISO_VOLUME_ID exceeds the ISO-9660 32-character limit."
+    [[ "$VNMINT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Invalid VNMINT_VERSION: $VNMINT_VERSION"
+    [[ "$VNMINT_EDITION" == "cinnamon" ]] || die "Unsupported vnmint edition: $VNMINT_EDITION"
+    [[ "$VNMINT_ARCH" == "amd64" ]] || die "Unsupported vnmint architecture: $VNMINT_ARCH"
     [[ "$BASE_ISO_SHA256" =~ ^[a-f0-9]{64}$ ]] || die "Invalid pinned base ISO SHA-256."
     [[ "$(trim_fingerprint "$MINT_SIGNING_FINGERPRINT")" =~ ^[A-F0-9]{40}$ ]] || die "Invalid Mint signing fingerprint."
     [[ "$GOOGLE_CHROME_PACKAGE" == "google-chrome-stable" ]] || die "Unexpected Google Chrome package name."
@@ -213,7 +211,12 @@ primary_key_fingerprint() {
     local key_file=$1
     gpg --batch --show-keys --with-colons "$key_file" 2>/dev/null |
         awk -F: '$1 == "pub" { want_fingerprint=1; next }
-            want_fingerprint && $1 == "fpr" { print $10; exit }'
+            want_fingerprint && $1 == "fpr" && !found {
+                print $10
+                found=1
+                want_fingerprint=0
+            }
+            END { if (!found) exit 1 }'
 }
 
 release_file_metadata() {
@@ -408,23 +411,23 @@ git_dirty() {
 }
 
 build_id() {
-    printf '%s\n' "$NAPOS_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|${ONLYOFFICE_DEB_SHA256:-unresolved}|${FCITX5_LOTUS_DEB_SHA256:-unresolved}|$WINDOWS_10_DARK_THEME_SHA256|$(git_revision)" |
+    printf '%s\n' "$VNMINT_VERSION|${BUILD_PROFILE:-unknown}|$BASE_ISO_SHA256|$(package_list_hash)|$(package_remove_list_hash)|${CHROME_DEB_SHA256:-unresolved}|${ONLYOFFICE_DEB_SHA256:-unresolved}|${FCITX5_LOTUS_DEB_SHA256:-unresolved}|$WINDOWS_10_DARK_THEME_SHA256|$(git_revision)" |
         sha256sum | cut -c1-16
 }
 
 output_iso_for_profile() {
     case "$1" in
-        dev) printf '%s/NapOS-%s-dev-%s-%s.iso\n' "$DIST_DIR" "$NAPOS_VERSION" "$NAPOS_EDITION" "$NAPOS_ARCH" ;;
-        release) printf '%s/NapOS-%s-%s-%s.iso\n' "$DIST_DIR" "$NAPOS_VERSION" "$NAPOS_EDITION" "$NAPOS_ARCH" ;;
+        dev) printf '%s/vnmint-%s-dev-%s-%s.iso\n' "$DIST_DIR" "$VNMINT_VERSION" "$VNMINT_EDITION" "$VNMINT_ARCH" ;;
+        release) printf '%s/vnmint-%s-%s-%s.iso\n' "$DIST_DIR" "$VNMINT_VERSION" "$VNMINT_EDITION" "$VNMINT_ARCH" ;;
         *) die "Unknown build profile: $1" ;;
     esac
 }
 
 latest_iso() {
     local result
-    result=$(find "$DIST_DIR" -maxdepth 1 -type f -name 'NapOS-*.iso' -printf '%T@ %p\n' 2>/dev/null |
+    result=$(find "$DIST_DIR" -maxdepth 1 -type f -name 'vnmint-*.iso' -printf '%T@ %p\n' 2>/dev/null |
         sort -nr | head -n1 | cut -d' ' -f2-)
-    [[ -n "$result" ]] || die "No NapOS ISO found in $DIST_DIR."
+    [[ -n "$result" ]] || die "No vnmint ISO found in $DIST_DIR."
     printf '%s\n' "$result"
 }
 
@@ -452,5 +455,5 @@ require_clean_mount_state() {
 }
 
 with_temp_dir() {
-    mktemp -d "${TMPDIR:-/tmp}/napos.XXXXXXXX"
+    mktemp -d "${TMPDIR:-/tmp}/vnmint.XXXXXXXX"
 }

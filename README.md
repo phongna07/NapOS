@@ -1,91 +1,74 @@
-# NapOS
+# vnmint
 
-> A beginner-friendly Linux distribution for Vietnamese based on Linux Mint using ISO remastering technique
+> A customized Linux Mint installation image with software and defaults prepared for Vietnamese users
 
-![NapOS desktop preview](public/napos-preview.png)
+![Linux Mint desktop preview](public/vnmint-preview.png)
 
-## Chào mừng bạn đến với NapOS
+## Linux Mint sẵn sàng cho người dùng Việt Nam
 
-NapOS được tạo ra để giúp người dùng Việt Nam, đặc biệt là những bạn mới
-làm quen với Linux, có thể bắt đầu thật dễ dàng. Giao diện quen thuộc, bộ gõ
-tiếng Việt và các ứng dụng thiết yếu đã sẵn sàng để bạn học tập, làm việc
-và giải trí. Hãy tải NapOS và khám phá một cách nhẹ nhàng để bước vào thế
-giới Linux.
+`vnmint` là tên của quy trình build và tệp ISO tùy chỉnh. Hệ điều hành trong
+ảnh cài đặt vẫn giữ nguyên tên, biểu tượng, hình nền, trình cài đặt và giao diện
+nhận diện của Linux Mint 22.3 Cinnamon.
 
-### Điều gì làm NapOS đặc biệt?
+Ảnh cài đặt bổ sung các ứng dụng và thiết lập thực tế để người dùng Việt Nam,
+đặc biệt là người mới làm quen với Linux, có thể bắt đầu nhanh hơn:
 
-- **Sẵn sàng gõ tiếng Việt.** Fcitx5 Lotus được cấu hình sẵn, giúp bạn
-  nhập tiếng Việt thuận tiện trong các ứng dụng được hỗ trợ.
-- **Giao diện thân thiện, quen thuộc.** Môi trường Cinnamon mang phong cách
-  gần gũi với Windows, kết hợp giao diện tối tinh tế và các biểu tượng
-  truy cập nhanh vào máy tính, thư mục cá nhân, thùng rác và ổ đĩa.
-- **Ứng dụng thiết yếu đã được cài đặt.** Duyệt web bằng Google Chrome,
-  làm việc với tài liệu Microsoft Office trong ONLYOFFICE, và thưởng thức âm
-  nhạc, video bằng VLC.
-- **Công cụ hữu ích luôn trong tầm tay.** Chụp và chú thích màn hình với
-  Flameshot, cài thêm ứng dụng qua Software Manager, và xem lại lịch sử bộ
-  nhớ tạm bằng CopyQ với phím tắt `Super+V`.
-- **Phông chữ quen thuộc cho tài liệu.** Bộ phông chữ thông dụng của Microsoft
-  giúp tài liệu giữ được hình thức quen thuộc khi chuyển đổi giữa Linux
-  và Windows.
-- **Được xây dựng trên Linux Mint.** NapOS kế thừa nền tảng Linux Mint 22.3
-  Cinnamon ổn định, thân thiện, đồng thời bổ sung bản sắc hình ảnh, lựa
-  chọn ứng dụng và thiết lập phù hợp hơn với người dùng Việt Nam.
+- **Sẵn sàng gõ tiếng Việt.** Fcitx5 Lotus được cài đặt và cấu hình sẵn với
+  bàn phím tiếng Anh đứng trước bộ gõ Lotus.
+- **Giao diện làm việc thuận tiện.** Thanh tác vụ được căn giữa, giao diện ứng
+  dụng Windows 10 Dark, con trỏ Yaru và các biểu tượng desktop hữu ích được cấu
+  hình sẵn, trong khi nhận diện Linux Mint vẫn được giữ nguyên.
+- **Ứng dụng thiết yếu.** Google Chrome, ONLYOFFICE, VLC, Flameshot và CopyQ
+  được cài đặt cùng các thiết lập mặc định phù hợp.
+- **Phông chữ quen thuộc.** Bộ phông chữ Microsoft thông dụng giúp tài liệu giữ
+  hình thức nhất quán hơn khi trao đổi với người dùng Windows.
+- **Nguồn gốc có thể kiểm tra.** ISO nền Linux Mint và các gói bên thứ ba được
+  xác thực bằng chữ ký, fingerprint và checksum đã ghim trước khi build.
 
-**[Download NapOS from GitHub Releases →](https://github.com/phongna07/NapOS/releases)**
+**[Tải ảnh cài đặt từ GitHub Releases →](https://github.com/phongna07/vnmint/releases)**
 
-## Linux that feels familiar
+## Familiar Linux Mint, useful from the first boot
 
-NapOS brings together the reliability of Linux Mint and a carefully prepared
-Cinnamon desktop. Its familiar layout, centered taskbar, dark theme, clear
-desktop shortcuts, and original NapOS artwork make the first login feel
-approachable instead of overwhelming.
+The generated image boots and installs as Linux Mint. Its GRUB and ISOLINUX
+menus, Cinnamon menu icon, wallpaper, Plymouth splash, installer launcher, and
+operating-system metadata are inherited from the authenticated Linux Mint 22.3
+Cinnamon image.
 
-It is designed for people who want Linux to be useful from the start. Common
-applications, sensible defaults, Vietnamese typing, and everyday conveniences
-are already in place, while the full flexibility of Linux remains available as
-you grow more confident.
+The customization is limited to bundled software and practical desktop
+defaults. Web links open in Chrome, common Microsoft Office formats open in
+ONLYOFFICE, VLC handles common media formats, CopyQ is available with
+`Super+V`, and Vietnamese input is ready through Fcitx5 Lotus.
 
-## Ready for daily use
+Boot the image into the Linux Mint live environment to evaluate it before
+installing. When ready, launch **Install Linux Mint** and follow the standard
+installer.
 
-NapOS chooses practical defaults so beginners have fewer setup decisions to
-make. Chrome opens web links, ONLYOFFICE handles common office document formats,
-and VLC plays popular audio and video files. Frequently used applications are
-placed directly on the desktop and taskbar, making them easy to discover.
+## Download
 
-You can boot NapOS into a live environment to explore the desktop before making
-changes to your computer. When you are ready, launch **Install NapOS** from the
-desktop and follow the guided installer.
-
-## Download NapOS
-
-Installation images are published on the
-**[NapOS Releases page](https://github.com/phongna07/NapOS/releases)**. Choose the
-latest release and review its accompanying notes before downloading.
-
-NapOS currently targets 64-bit PCs (`amd64`). Back up important files before
+Images are published on the
+**[vnmint Releases page](https://github.com/phongna07/vnmint/releases)**. The
+current build targets 64-bit PCs (`amd64`). Back up important files before
 installing any operating system.
 
 ## For contributors
 
-NapOS is produced by remastering an authenticated Linux Mint ISO. The repository
-contains the build workflow, package policy, desktop configuration, artwork,
-and non-networked test suite.
+The repository contains the authenticated ISO-remaster workflow, package
+policy, desktop configuration, and non-networked test suite.
 
 ```bash
 make help
 make test
 ```
 
-`make help` lists the supported development commands, while `make test` runs
-the routine checks without requiring root access or a network connection. See
-the [contributor build guide](docs/building.md) for native Ubuntu and WSL2 host
-requirements, dependency installation, and complete ISO build commands.
+`make help` lists the supported commands. `make test` runs routine validation
+without root access or a network connection. See the
+[contributor build guide](docs/building.md) for native Ubuntu and WSL2 host
+requirements and complete ISO build commands.
 
 ## License
 
-Original NapOS build scripts and artwork are licensed under
+The vnmint build scripts and configuration are licensed under
 [GPL-3.0-only](LICENSE). Linux Mint and bundled applications retain their own
 licenses. The image includes third-party software and fonts, including Google
 Chrome and Microsoft core fonts, which are governed by separate terms; review
-those terms before redistributing a NapOS image.
+those terms before redistributing the image.

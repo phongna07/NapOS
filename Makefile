@@ -6,31 +6,31 @@ ISO ?=
 .PHONY: help doctor fetch dev release verify inspect test clean-work clean-cache
 
 help:
-	@tools/napos-build help
+	@tools/vnmint-build help
 
 doctor:
-	@tools/napos-build doctor
+	@tools/vnmint-build doctor
 
 fetch:
-	@tools/napos-build fetch
+	@tools/vnmint-build fetch
 
 dev:
-	@tools/napos-build build dev
+	@tools/vnmint-build build dev
 
 release:
-	@tools/napos-build build release
+	@tools/vnmint-build build release
 
 verify:
-	@tools/napos-build verify "$(ISO)"
+	@tools/vnmint-build verify "$(ISO)"
 
 inspect:
-	@tools/napos-build inspect "$(ISO)"
+	@tools/vnmint-build inspect "$(ISO)"
 
 test:
 	@tools/tests/selftest.sh
 
 clean-work:
-	@tools/napos-build clean-work
+	@tools/vnmint-build clean-work
 
 clean-cache:
-	@tools/napos-build clean-cache
+	@tools/vnmint-build clean-cache

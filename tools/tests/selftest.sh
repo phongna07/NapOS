@@ -26,28 +26,28 @@ expect_failure() {
 }
 
 validate_config
-pass "Configuration validates with exact NapOS identity"
+pass "Configuration validates the vnmint build settings"
 
 mapfile -t scripts < <(
     find "$PROJECT_ROOT/tools" "$PROJECT_ROOT/config/hooks" \
         "$PROJECT_ROOT/config/overlay/usr/libexec" -type f \
-        \( -name '*.sh' -o -path "$PROJECT_ROOT/tools/napos-build" \
-            -o -path "$PROJECT_ROOT/config/overlay/usr/libexec/napos-fcitx5-lotus-user" \) | sort
+        \( -name '*.sh' -o -path "$PROJECT_ROOT/tools/vnmint-build" \
+            -o -path "$PROJECT_ROOT/config/overlay/usr/libexec/fcitx5-lotus-user-resolver" \) | sort
 )
 for script in "${scripts[@]}"; do
     expect_success "Bash syntax: ${script#"$PROJECT_ROOT/"}" bash -n "$script"
 done
 
-if shellcheck -x "$PROJECT_ROOT/tools/napos-build" "$PROJECT_ROOT/tools/lib/common.sh" \
+if shellcheck -x "$PROJECT_ROOT/tools/vnmint-build" "$PROJECT_ROOT/tools/lib/common.sh" \
     "$PROJECT_ROOT/tools/tests/selftest.sh" "$PROJECT_ROOT/tools/ci/reclaim-github-disk.sh" \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" \
-    "$PROJECT_ROOT/config/overlay/usr/libexec/napos-fcitx5-lotus-user"; then
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh" \
+    "$PROJECT_ROOT/config/overlay/usr/libexec/fcitx5-lotus-user-resolver"; then
     pass "ShellCheck"
 else
     fail "ShellCheck"
 fi
 
-safe_root=$(mktemp -d "${TMPDIR:-/tmp}/napos-selftest.XXXXXXXX")
+safe_root=$(mktemp -d "${TMPDIR:-/tmp}/vnmint-selftest.XXXXXXXX")
 trap 'rm -rf -- "$safe_root"' EXIT
 mkdir -p "$safe_root/work/child"
 
@@ -70,11 +70,25 @@ flock -n 7
 expect_failure "Concurrent lock holder is rejected" flock -n "$safe_root/build.lock" true
 flock -u 7
 
-invalid_name_config() (
-    local NAPOS_NAME=Napos
+invalid_version_config() (
+    local VNMINT_VERSION=invalid
     validate_config 2>/dev/null
 )
-expect_failure "Invalid display-name configuration is rejected" invalid_name_config
+expect_failure "Invalid remix version is rejected" invalid_version_config
+
+invalid_edition_config() (
+    # shellcheck disable=SC2030
+    local VNMINT_EDITION=xfce
+    validate_config 2>/dev/null
+)
+expect_failure "Unsupported remix edition is rejected" invalid_edition_config
+
+invalid_architecture_config() (
+    # shellcheck disable=SC2030
+    local VNMINT_ARCH=arm64
+    validate_config 2>/dev/null
+)
+expect_failure "Unsupported remix architecture is rejected" invalid_architecture_config
 
 invalid_fingerprint_config() (
     # shellcheck disable=SC2030
@@ -104,6 +118,22 @@ invalid_fcitx5_lotus_fingerprint_config() (
 )
 expect_failure "Invalid Fcitx5 Lotus signing fingerprint is rejected" \
     invalid_fcitx5_lotus_fingerprint_config
+
+fingerprint_parser_consumes_complete_gpg_output() (
+    local expected=0123456789ABCDEF0123456789ABCDEF01234567
+    gpg() {
+        awk -v fingerprint="$expected" 'BEGIN {
+            print "pub:-:2048:1:0000000000000000:0:0::::::"
+            print "fpr:::::::::" fingerprint ":"
+            for (line=0; line<100000; line++) {
+                print "uid:-::::0::0000000000000000::Test key " line "::::::::"
+            }
+        }'
+    }
+    [[ "$(primary_key_fingerprint /dev/null)" == "$expected" ]]
+)
+expect_success "Fingerprint parser consumes complete GPG output under pipefail" \
+    fingerprint_parser_consumes_complete_gpg_output
 
 invalid_theme_url_config() (
     # shellcheck disable=SC2030
@@ -136,22 +166,23 @@ expect_failure "Invalid Windows 10 Dark theme SHA-256 is rejected" invalid_theme
 
 alternate_version_config() (
     # shellcheck disable=SC2030
-    NAPOS_VERSION=9.8.7
-    # shellcheck disable=SC2030
-    ISO_VOLUME_ID="NAPOS_${NAPOS_VERSION//./_}"
+    VNMINT_VERSION=9.8.7
     validate_config 2>/dev/null
 )
-expect_success "Configuration supports a version change without duplicated identity" alternate_version_config
+expect_success "Configuration supports a version change without guest identity changes" alternate_version_config
 
 # shellcheck disable=SC2031
-if [[ "$ISO_VOLUME_ID" == "NAPOS_${NAPOS_VERSION//./_}" ]]; then
-    pass "ISO volume ID is derived from the authoritative NapOS version"
+if [[ "$(output_iso_for_profile dev)" == \
+        "$DIST_DIR/vnmint-$VNMINT_VERSION-dev-$VNMINT_EDITION-$VNMINT_ARCH.iso" ]] &&
+    [[ "$(output_iso_for_profile release)" == \
+        "$DIST_DIR/vnmint-$VNMINT_VERSION-$VNMINT_EDITION-$VNMINT_ARCH.iso" ]]; then
+    pass "Development and release artifact names follow the vnmint interface"
 else
-    fail "ISO volume ID is derived from the authoritative NapOS version"
+    fail "Development and release artifact names follow the vnmint interface"
 fi
 
 eval "$(sed -n '/^check_wsl()/,/^check_disk_space()/p' \
-    "$PROJECT_ROOT/tools/napos-build" | sed '$d')"
+    "$PROJECT_ROOT/tools/vnmint-build" | sed '$d')"
 
 supported_native_ubuntu_fixture() (
     # shellcheck disable=SC2317
@@ -235,7 +266,7 @@ filesystem_type_fixture() (
     local mocked_type=$1
     # shellcheck disable=SC2317
     stat() { printf '%s\n' "$mocked_type"; }
-    check_supported_filesystem /mnt/linux-disk/napos
+    check_supported_filesystem /mnt/linux-disk/vnmint
 )
 expect_success "Linux filesystem below /mnt is accepted" filesystem_type_fixture ext2/ext3
 expect_success "XFS filesystem below /mnt is accepted" filesystem_type_fixture xfs
@@ -300,7 +331,7 @@ else
     fail "Windows 10 Dark theme source equals the reviewed official pin"
 fi
 
-printf 'NapOS checksum fixture\n' >"$safe_root/payload"
+printf 'vnmint checksum fixture\n' >"$safe_root/payload"
 expected=$(sha256sum "$safe_root/payload" | awk '{print $1}')
 actual=$(sha256_of "$safe_root/payload")
 if [[ "$actual" == "$expected" ]]; then
@@ -316,7 +347,7 @@ else
 fi
 
 eval "$(sed -n '/^validate_windows_10_dark_theme_archive()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
+    "$PROJECT_ROOT/tools/vnmint-build")"
 python3 - "$safe_root/theme-valid.zip" "$safe_root/theme-invalid.zip" <<'PY'
 import sys
 import zipfile
@@ -493,15 +524,15 @@ sed 's/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/not-a-sh
 expect_failure "Fcitx5 Lotus metadata rejects an invalid package SHA-256" \
     fcitx5_lotus_package_metadata "$safe_root/Fcitx5-Lotus-Packages-bad-sha"
 
-mkdir -p "$safe_root/onlyoffice-package/DEBIAN" "$safe_root/onlyoffice-package/usr/share/napos-test"
+mkdir -p "$safe_root/onlyoffice-package/DEBIAN" "$safe_root/onlyoffice-package/usr/share/vnmint-test"
 cat >"$safe_root/onlyoffice-package/DEBIAN/control" <<'EOF'
 Package: onlyoffice-desktopeditors
 Version: 9.4.0-129
 Architecture: amd64
-Maintainer: NapOS tests <noreply@example.invalid>
+Maintainer: vnmint tests <noreply@example.invalid>
 Description: ONLYOFFICE validation fixture
 EOF
-printf 'fixture\n' >"$safe_root/onlyoffice-package/usr/share/napos-test/payload"
+printf 'fixture\n' >"$safe_root/onlyoffice-package/usr/share/vnmint-test/payload"
 dpkg-deb --build "$safe_root/onlyoffice-package" "$safe_root/onlyoffice.deb" >/dev/null
 onlyoffice_fixture_sha=$(sha256_of "$safe_root/onlyoffice.deb")
 onlyoffice_fixture_size=$(stat -c '%s' "$safe_root/onlyoffice.deb")
@@ -515,15 +546,15 @@ expect_failure "ONLYOFFICE package validator rejects the wrong size" \
     validate_onlyoffice_deb "$safe_root/onlyoffice.deb" 9.4.0-129 \
     "$onlyoffice_fixture_sha" "$((onlyoffice_fixture_size + 1))"
 
-mkdir -p "$safe_root/lotus-package/DEBIAN" "$safe_root/lotus-package/usr/share/napos-test"
+mkdir -p "$safe_root/lotus-package/DEBIAN" "$safe_root/lotus-package/usr/share/vnmint-test"
 cat >"$safe_root/lotus-package/DEBIAN/control" <<'EOF'
 Package: fcitx5-lotus
 Version: 3.4.0-1
 Architecture: amd64
-Maintainer: NapOS tests <noreply@example.invalid>
+Maintainer: vnmint tests <noreply@example.invalid>
 Description: Fcitx5 Lotus validation fixture
 EOF
-printf 'fixture\n' >"$safe_root/lotus-package/usr/share/napos-test/payload"
+printf 'fixture\n' >"$safe_root/lotus-package/usr/share/vnmint-test/payload"
 dpkg-deb --build "$safe_root/lotus-package" "$safe_root/lotus.deb" >/dev/null
 lotus_fixture_sha=$(sha256_of "$safe_root/lotus.deb")
 lotus_fixture_size=$(stat -c '%s' "$safe_root/lotus.deb")
@@ -629,10 +660,10 @@ else
     fail "Fcitx5 defaults enable Lotus behind the standard Ctrl+Space activation"
 fi
 
-lotus_user_helper="$PROJECT_ROOT/config/overlay/usr/libexec/napos-fcitx5-lotus-user"
+lotus_user_helper="$PROJECT_ROOT/config/overlay/usr/libexec/fcitx5-lotus-user-resolver"
 expect_failure "Lotus user resolver rejects root" bash "$lotus_user_helper" --check root
 expect_failure "Lotus user resolver rejects unknown users" \
-    bash "$lotus_user_helper" --check napos-user-does-not-exist
+    bash "$lotus_user_helper" --check vnmint-user-does-not-exist
 mkdir -p "$safe_root/lotus-helper-bin"
 cat >"$safe_root/lotus-helper-bin/getent" <<'EOF'
 #!/bin/sh
@@ -648,51 +679,51 @@ expect_success "Lotus user resolver accepts an interactive home user by UID" \
 expect_failure "Lotus user resolver rejects a display-manager account" \
     env PATH="$safe_root/lotus-helper-bin:/usr/bin:/bin" bash "$lotus_user_helper" --check 120
 
-lotus_user_unit="$PROJECT_ROOT/config/overlay/etc/systemd/system/user@.service.d/50-napos-fcitx5-lotus.conf"
-lotus_server_unit="$PROJECT_ROOT/config/overlay/etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf"
+lotus_user_unit="$PROJECT_ROOT/config/overlay/etc/systemd/system/user@.service.d/50-fcitx5-lotus.conf"
+lotus_server_unit="$PROJECT_ROOT/config/overlay/etc/systemd/system/fcitx5-lotus-server@.service.d/10-user-resolution.conf"
 if grep -Fqx 'Wants=fcitx5-lotus-server@%i.service' "$lotus_user_unit" &&
     grep -Fqx 'PartOf=user@%i.service' "$lotus_server_unit" &&
-    grep -Fqx 'ExecCondition=/usr/libexec/napos-fcitx5-lotus-user --check %i' "$lotus_server_unit" &&
-    grep -Fqx 'ExecStart=/usr/libexec/napos-fcitx5-lotus-user --exec %i' "$lotus_server_unit"; then
+    grep -Fqx 'ExecCondition=/usr/libexec/fcitx5-lotus-user-resolver --check %i' "$lotus_server_unit" &&
+    grep -Fqx 'ExecStart=/usr/libexec/fcitx5-lotus-user-resolver --exec %i' "$lotus_server_unit"; then
     pass "Lotus server follows each eligible systemd user lifecycle"
 else
     fail "Lotus server follows each eligible systemd user lifecycle"
 fi
 
-branding_hook="$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"
+customization_hook="$PROJECT_ROOT/config/hooks/0100-customize-system.sh"
 if grep -Fq 'copyq_desktop=/usr/share/applications/com.github.hluk.copyq.desktop' \
-    "$branding_hook" &&
-    grep -Fq '/etc/xdg/autostart/com.github.hluk.copyq.desktop' "$branding_hook" &&
-    grep -Fq "sed -i 's|^Exec=.*|Exec=copyq|'" "$branding_hook"; then
+    "$customization_hook" &&
+    grep -Fq '/etc/xdg/autostart/com.github.hluk.copyq.desktop' "$customization_hook" &&
+    grep -Fq "sed -i 's|^Exec=.*|Exec=copyq|'" "$customization_hook"; then
     pass "CopyQ starts hidden for every desktop login"
 else
     fail "CopyQ starts hidden for every desktop login"
 fi
 
 if grep -Fq 'flameshot_desktop=/usr/share/applications/org.flameshot.Flameshot.desktop' \
-    "$branding_hook" &&
-    grep -Fq '/etc/xdg/autostart/org.flameshot.Flameshot.desktop' "$branding_hook" &&
-    grep -Fq "sed -i '0,/^Exec=.*/s|^Exec=.*|Exec=flameshot|'" "$branding_hook"; then
+    "$customization_hook" &&
+    grep -Fq '/etc/xdg/autostart/org.flameshot.Flameshot.desktop' "$customization_hook" &&
+    grep -Fq "sed -i '0,/^Exec=.*/s|^Exec=.*|Exec=flameshot|'" "$customization_hook"; then
     pass "Flameshot starts for every desktop login"
 else
     fail "Flameshot starts for every desktop login"
 fi
 
-if grep -Fq 'XMODIFIERS=@im=fcitx' "$branding_hook" &&
-    grep -Fq 'GTK_IM_MODULE=fcitx' "$branding_hook" &&
-    grep -Fq 'QT_IM_MODULE=fcitx' "$branding_hook" &&
-    grep -Fq 'SDL_IM_MODULE=fcitx' "$branding_hook" &&
-    grep -Fq 'GLFW_IM_MODULE=ibus' "$branding_hook" &&
-    grep -Fq '/etc/xdg/autostart/org.fcitx.Fcitx5.desktop' "$branding_hook"; then
+if grep -Fq 'XMODIFIERS=@im=fcitx' "$customization_hook" &&
+    grep -Fq 'GTK_IM_MODULE=fcitx' "$customization_hook" &&
+    grep -Fq 'QT_IM_MODULE=fcitx' "$customization_hook" &&
+    grep -Fq 'SDL_IM_MODULE=fcitx' "$customization_hook" &&
+    grep -Fq 'GLFW_IM_MODULE=ibus' "$customization_hook" &&
+    grep -Fq '/etc/xdg/autostart/org.fcitx.Fcitx5.desktop' "$customization_hook"; then
     pass "Desktop sessions inherit Fcitx5 variables and global autostart"
 else
     fail "Desktop sessions inherit Fcitx5 variables and global autostart"
 fi
 
-install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
-if grep -Fq '/usr/bin/env LOGNAME=root PATH=/tmp/napos-maintscript-bin:' <<<"$install_function" &&
+install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' "$PROJECT_ROOT/tools/vnmint-build")
+if grep -Fq '/usr/bin/env LOGNAME=root PATH=/tmp/remix-maintscript-bin:' <<<"$install_function" &&
     grep -Fq 'for command in modprobe udevadm systemctl killall' <<<"$install_function" &&
-    grep -Fq '/tmp/napos-fcitx5-lotus.deb' <<<"$install_function" &&
+    grep -Fq '/tmp/remix-fcitx5-lotus.deb' <<<"$install_function" &&
     grep -Fq 'systemd-sysusers' <<<"$install_function"; then
     pass "Lotus package installation isolates maintainer-script host side effects"
 else
@@ -700,7 +731,7 @@ else
 fi
 
 validation_function=$(sed -n '/^validate_customized_rootfs()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")
+    "$PROJECT_ROOT/tools/vnmint-build")
 if grep -Fq 'update-notifier-common:/etc/apt/apt.conf.d/10periodic' \
     <<<"$validation_function" &&
     grep -Fq 'ubuntu-pro-client:/etc/apt/apt.conf.d/20apt-esm-hook.conf' \
@@ -713,8 +744,8 @@ else
     fail "Microsoft font dependencies permit only checksum-verified APT conffiles"
 fi
 
-build_info_function=$(sed -n '/^write_build_info()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
-verify_function=$(sed -n '/^cmd_verify()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+build_info_function=$(sed -n '/^write_build_info()/,/^}/p' "$PROJECT_ROOT/tools/vnmint-build")
+verify_function=$(sed -n '/^cmd_verify()/,/^}/p' "$PROJECT_ROOT/tools/vnmint-build")
 if grep -Fq "fcitx5_lotus:{package:\$lotus_package" <<<"$build_info_function" &&
     grep -Fq '.source.fcitx5_lotus.version' <<<"$verify_function" &&
     grep -Fq '.source.fcitx5_lotus.signing_fingerprint' <<<"$verify_function"; then
@@ -727,7 +758,7 @@ fi
 if grep -Fq 'windows_10_dark_theme:{name:$theme_name' <<<"$build_info_function" &&
     grep -Fq '.source.windows_10_dark_theme.catalog_commit' <<<"$verify_function" &&
     grep -Fq '.source.windows_10_dark_theme.sha256' <<<"$verify_function" &&
-    grep -Fq 'fetch_windows_10_dark_theme' "$PROJECT_ROOT/tools/napos-build"; then
+    grep -Fq 'fetch_windows_10_dark_theme' "$PROJECT_ROOT/tools/vnmint-build"; then
     pass "Build fetches, records, and verifies the pinned Windows 10 Dark theme"
 else
     fail "Build fetches, records, and verifies the pinned Windows 10 Dark theme"
@@ -807,14 +838,14 @@ else
     fail "Package removal profile hash is stable"
 fi
 if ! grep -qx 'mintwelcome' "$PROJECT_ROOT/config/packages-remove.txt" &&
-    ! grep -Fq 'Mint Welcome autostart entry remains' "$PROJECT_ROOT/tools/napos-build" &&
-    ! grep -Fq 'Mint Welcome launcher remains' "$PROJECT_ROOT/tools/napos-build"; then
+    ! grep -Fq 'Mint Welcome autostart entry remains' "$PROJECT_ROOT/tools/vnmint-build" &&
+    ! grep -Fq 'Mint Welcome launcher remains' "$PROJECT_ROOT/tools/vnmint-build"; then
     pass "Mint Welcome remains inherited from the base image"
 else
     fail "Mint Welcome remains inherited from the base image"
 fi
 
-install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' "$PROJECT_ROOT/tools/vnmint-build")
 eula_preseed_line=$(grep -n -F -m1 \
     'ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula boolean true' \
     <<<"$install_function" | cut -d: -f1 || true)
@@ -828,29 +859,29 @@ else
     fail "Microsoft core fonts EULA is preseeded before repository package installation"
 fi
 
-branding_hook=$(<"$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")
-if grep -Fq 'ubiquity ubiquity/use_nonfree boolean true' <<<"$branding_hook" &&
-    grep -Fq 'debconf-set-selections' <<<"$branding_hook"; then
+customization_hook=$(<"$PROJECT_ROOT/config/hooks/0100-customize-system.sh")
+if grep -Fq 'ubiquity ubiquity/use_nonfree boolean true' <<<"$customization_hook" &&
+    grep -Fq 'debconf-set-selections' <<<"$customization_hook"; then
     pass "Live installer enables multimedia codecs by default"
 else
     fail "Live installer enables multimedia codecs by default"
 fi
 
-if grep -Fq 'napos-packages-remove.txt' <<<"$install_function" &&
+if grep -Fq 'remix-packages-remove.txt' <<<"$install_function" &&
     grep -Fq 'apt-get purge -y --' <<<"$install_function"; then
     pass "Build consumes the package removal profile with APT purge"
 else
     fail "Build consumes the package removal profile with APT purge"
 fi
 
-if grep -Eq 'apt(-get)?[[:space:]]+autoremove' "$PROJECT_ROOT/tools/napos-build"; then
+if grep -Eq 'apt(-get)?[[:space:]]+autoremove' "$PROJECT_ROOT/tools/vnmint-build"; then
     fail "Package removal policy avoids APT autoremove"
 else
     pass "Package removal policy avoids APT autoremove"
 fi
 
 if grep -Fq "s/=firefox\\.desktop\$/=google-chrome.desktop/" \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh"; then
     pass "Desktop application defaults replace Firefox with Google Chrome"
 else
     fail "Desktop application defaults replace Firefox with Google Chrome"
@@ -866,9 +897,9 @@ EOF
 sed 's/io\.github\.celluloid_player\.Celluloid\.desktop/vlc.desktop/g' "$mimeapps_fixture" \
     >"$safe_root/mimeapps.expected"
 if grep -Fq 's/io\.github\.celluloid_player\.Celluloid\.desktop/vlc.desktop/g' \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh" &&
     grep -Fq "grep -Fq \"\$celluloid_desktop\" \"\$mimeapps_file\"" \
-        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+        "$PROJECT_ROOT/config/hooks/0100-customize-system.sh" &&
     grep -qx 'video/mp4=vlc.desktop' "$safe_root/mimeapps.expected" &&
     grep -qx 'audio/ogg=vlc.desktop;org.gnome.Rhythmbox3.desktop' "$safe_root/mimeapps.expected" &&
     grep -qx 'audio/flac=org.gnome.Rhythmbox3.desktop' "$safe_root/mimeapps.expected" &&
@@ -879,7 +910,7 @@ else
 fi
 
 eval "$(sed -n '/^set_mime_default()/,/^}/p' \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh")"
 office_mimeapps_fixture="$safe_root/office-mimeapps.list"
 cat >"$office_mimeapps_fixture" <<'EOF'
 [Default Applications]
@@ -913,35 +944,35 @@ else
 fi
 
 if grep -Fq 'application/vnd.ms-excel.sheet.binary.macroEnabled.12' \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh" &&
     grep -Fq 'application/vnd.ms-powerpoint.slideshow.macroEnabled.12' \
-        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh" &&
+        "$PROJECT_ROOT/config/hooks/0100-customize-system.sh" &&
     grep -Fq 'text/x-comma-separated-values' \
-        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
+        "$PROJECT_ROOT/config/hooks/0100-customize-system.sh"; then
     pass "ONLYOFFICE policy includes Microsoft templates, macros, slideshows, RTF, and CSV"
 else
     fail "ONLYOFFICE policy includes Microsoft templates, macros, slideshows, RTF, and CSV"
 fi
 
 eval "$(sed -n '/^validate_cinnamon_panel_defaults()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
+    "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_cinnamon_desktop_defaults()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
+    "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_cinnamon_menu_icon_defaults()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
+    "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_cinnamon_launcher_defaults()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
+    "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_desktop_shortcuts()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
+    "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_cinnamon_copyq_defaults()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
+    "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_cinnamon_theme_defaults()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
+    "$PROJECT_ROOT/tools/vnmint-build")"
 dconf_defaults=$(awk '
-    index($0, "cat >/etc/dconf/db/local.d/00-napos") { active=1; next }
+    index($0, "cat >/etc/dconf/db/local.d/00-desktop-defaults") { active=1; next }
     active && $0 == "EOF" { exit }
     active { print }
-' "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")
+' "$PROJECT_ROOT/config/hooks/0100-customize-system.sh")
 expect_success "Cinnamon defaults center the menu and grouped application list" \
     validate_cinnamon_panel_defaults "$dconf_defaults"
 left_panel_defaults=$(sed \
@@ -995,64 +1026,39 @@ cat >"$menu_settings_fixture" <<'EOF'
     "menu-custom": {"default": true, "override-props": true},
     "menu-label": {"default": "", "override-props": true},
     "menu-icon": {
-        "default": "/usr/share/icons/hicolor/scalable/apps/napos-logo.svg",
-        "default_icon": "/usr/share/icons/hicolor/scalable/apps/napos-logo.svg",
-        "override-props": true
-    }
-}
-EOF
-expect_success "Cinnamon menu defaults use the NapOS icon" \
-    validate_cinnamon_menu_icon_defaults "$(cat "$menu_settings_fixture")"
-wrong_menu_icon=$(sed 's|napos-logo.svg|linuxmint-logo-ring-symbolic|g' \
-    "$menu_settings_fixture")
-expect_failure "Cinnamon menu defaults reject the Linux Mint icon" \
-    validate_cinnamon_menu_icon_defaults "$wrong_menu_icon"
-missing_menu_icon='{"menu-custom":{"default":true}}'
-expect_failure "Cinnamon menu defaults require an icon override" \
-    validate_cinnamon_menu_icon_defaults "$missing_menu_icon"
-
-eval "$(sed -n '/^set_cinnamon_menu_icon_default()/,/^}/p' \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
-mint_menu_settings="$safe_root/mint-menu-settings-override.json"
-menu_icon_fixture="$safe_root/napos-logo.svg"
-cat >"$mint_menu_settings" <<'EOF'
-{
-    "menu-custom": {"default": false, "override-props": true},
-    "menu-label": {"default": "preserved", "override-props": true},
-    "menu-icon": {
         "default": "linuxmint-logo-ring-symbolic",
         "default_icon": "linuxmint-logo-ring-symbolic",
         "override-props": true
     }
 }
 EOF
-touch "$menu_icon_fixture"
-expect_success "Branding hook replaces the Cinnamon menu icon default" \
-    set_cinnamon_menu_icon_default "$mint_menu_settings" "$menu_icon_fixture"
-if jq -e --arg icon "$menu_icon_fixture" '
-    .["menu-custom"].default == true and
-    .["menu-icon"].default == $icon and
-    .["menu-icon"].default_icon == $icon and
-    .["menu-label"].default == "preserved"
-' "$mint_menu_settings" >/dev/null; then
-    pass "Cinnamon menu customization preserves unrelated settings"
+expect_success "Cinnamon menu defaults preserve the Linux Mint icon" \
+    validate_cinnamon_menu_icon_defaults "$(cat "$menu_settings_fixture")"
+wrong_menu_icon=$(sed 's|linuxmint-logo-ring-symbolic|start-here-symbolic|g' \
+    "$menu_settings_fixture")
+expect_failure "Cinnamon menu defaults reject a non-Mint icon" \
+    validate_cinnamon_menu_icon_defaults "$wrong_menu_icon"
+missing_menu_icon='{"menu-custom":{"default":true}}'
+expect_failure "Cinnamon menu defaults require an icon override" \
+    validate_cinnamon_menu_icon_defaults "$missing_menu_icon"
+
+if ! grep -Fq 'set_cinnamon_menu_icon_default' \
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh"; then
+    pass "Customization hook leaves the Linux Mint menu icon untouched"
 else
-    fail "Cinnamon menu customization preserves unrelated settings"
+    fail "Customization hook leaves the Linux Mint menu icon untouched"
 fi
-expect_failure "Cinnamon menu customization rejects a missing override" \
-    set_cinnamon_menu_icon_default "$safe_root/missing-menu-settings.json" \
-    "$menu_icon_fixture"
 
 grouped_launcher_fixture="$safe_root/grouped-window-list.json"
 panel_launcher_fixture="$safe_root/panel-launchers.json"
 taskbar_launchers=()
 eval "$(sed -n '/^taskbar_launchers=(/,/^)/p' \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh")"
 if [[ "${taskbar_launchers[*]}" == \
     "nemo.desktop google-chrome.desktop onlyoffice-desktopeditors.desktop mintinstall.desktop cinnamon-settings.desktop org.gnome.SystemMonitor.desktop" ]]; then
-    pass "Branding hook defines the requested taskbar launcher order"
+    pass "Customization hook defines the requested taskbar launcher order"
 else
-    fail "Branding hook defines the requested taskbar launcher order"
+    fail "Customization hook defines the requested taskbar launcher order"
 fi
 cat >"$grouped_launcher_fixture" <<'EOF'
 {"pinned-apps":{"default":["nemo.desktop","google-chrome.desktop","onlyoffice-desktopeditors.desktop","mintinstall.desktop","cinnamon-settings.desktop","org.gnome.SystemMonitor.desktop"]}}
@@ -1076,15 +1082,15 @@ expect_failure "Cinnamon taskbar defaults require every requested launcher" \
     "$incomplete_panel_launchers"
 
 eval "$(sed -n '/^install_desktop_shortcuts()/,/^}/p' \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh")"
 desktop_shortcuts=()
 eval "$(sed -n '/^desktop_shortcuts=(/,/^)/p' \
-    "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")"
+    "$PROJECT_ROOT/config/hooks/0100-customize-system.sh")"
 if [[ "${desktop_shortcuts[*]}" == \
     "google-chrome.desktop onlyoffice-desktopeditors.desktop mintinstall.desktop org.gnome.SystemMonitor.desktop" ]]; then
-    pass "Branding hook defines the requested desktop shortcuts"
+    pass "Customization hook defines the requested desktop shortcuts"
 else
-    fail "Branding hook defines the requested desktop shortcuts"
+    fail "Customization hook defines the requested desktop shortcuts"
 fi
 shortcut_sources="$safe_root/shortcut-sources"
 shortcut_desktop="$safe_root/shortcut-desktop"
@@ -1125,24 +1131,30 @@ else
     fail "Cinnamon desktop icon defaults are not locked"
 fi
 
-if rg -n 'Napos' "$PROJECT_ROOT/remix.conf" "$PROJECT_ROOT/config" >/dev/null; then
-    fail 'Incorrect product spelling "Napos" exists in configuration or assets'
+rootfs_validation_function=$(sed -n '/^validate_customized_rootfs()/,/^}/p' \
+    "$PROJECT_ROOT/tools/vnmint-build")
+# shellcheck disable=SC2016
+if grep -Eq '^picture-uri=' <<<"$dconf_defaults" ||
+    ! grep -Fq 'mint_background_quote=$(printf "\047")' <<<"$rootfs_validation_function" ||
+    ! grep -Fq 'picture-uri=${mint_background_quote}file:///usr/share/backgrounds/linuxmint/default_background.jpg${mint_background_quote}' \
+        <<<"$rootfs_validation_function"; then
+    fail "Desktop defaults do not override the Linux Mint wallpaper"
 else
-    pass "Branding capitalization is exact"
+    pass "Desktop defaults do not override the Linux Mint wallpaper"
 fi
 
-wallpaper="$PROJECT_ROOT/config/overlay/usr/share/backgrounds/napos/napos-wallpaper.svg"
-if [[ -s "$wallpaper" ]] &&
-    grep -Fq '<svg xmlns="http://www.w3.org/2000/svg"' "$wallpaper" &&
-    grep -Fq 'width="3840" height="2160"' "$wallpaper"; then
-    pass "Wallpaper is a non-empty 4K SVG asset"
+custom_artwork_count=$(find "$PROJECT_ROOT/config/overlay/usr/share" -type f \
+    \( -path '*/backgrounds/*' -o -path '*/icons/hicolor/scalable/apps/*' \
+        -o -path '*/plymouth/themes/*' \) 2>/dev/null | wc -l)
+if [[ "$custom_artwork_count" == 0 ]]; then
+    pass "Custom wallpaper, icon, and Plymouth assets are absent"
 else
-    fail "Wallpaper is a non-empty 4K SVG asset"
+    fail "Custom wallpaper, icon, and Plymouth assets are absent"
 fi
 
-eval "$(sed -n '/^brand_iso_boot_labels()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")"
-boot_fixture="$safe_root/boot-branding"
+eval "$(sed -n '/^validate_mint_boot_labels()/,/^}/p' \
+    "$PROJECT_ROOT/tools/vnmint-build")"
+boot_fixture="$safe_root/mint-boot-labels"
 mkdir -p "$boot_fixture"
 cat >"$boot_fixture/grub.cfg" <<'EOF'
 menuentry "Start Linux Mint 22.3 Cinnamon 64-bit" --class linuxmint {
@@ -1165,100 +1177,57 @@ label compat
     linux /casper/vmlinuz
     append boot=casper initrd=/casper/initrd.lz uuid=test-uuid username=mint hostname=mint noapic nomodeset --
 EOF
-expect_success "Boot-label rewriting brands GRUB and ISOLINUX without changing boot arguments" \
-    brand_iso_boot_labels "$boot_fixture/grub.cfg" "$boot_fixture/live.cfg"
-if grep -Fq 'boot=casper uuid=test-uuid username=mint hostname=mint' \
-    "$boot_fixture/grub.cfg" "$boot_fixture/live.cfg" &&
-    grep -Fq 'menuentry "Start NapOS (compatibility mode)"' "$boot_fixture/grub.cfg" &&
-    grep -Fq 'menu label Start NapOS in compatibility mode' "$boot_fixture/live.cfg"; then
-    pass "Boot-label rewriting preserves Mint-compatible Casper identity and compatibility entries"
-else
-    fail "Boot-label rewriting preserves Mint-compatible Casper identity and compatibility entries"
-fi
+expect_success "Mint GRUB and ISOLINUX labels are accepted" \
+    validate_mint_boot_labels "$boot_fixture/grub.cfg" "$boot_fixture/live.cfg"
 cp "$boot_fixture/grub.cfg" "$boot_fixture/invalid-grub.cfg"
-sed -i 's/Start NapOS/Start Other OS/g' "$boot_fixture/invalid-grub.cfg"
-expect_failure "Boot-label rewriting rejects an input without the expected Mint entries" \
-    brand_iso_boot_labels "$boot_fixture/invalid-grub.cfg" "$boot_fixture/live.cfg"
+sed -i 's/Start Linux Mint/Start Other OS/g' "$boot_fixture/invalid-grub.cfg"
+expect_failure "Altered Mint boot labels are rejected" \
+    validate_mint_boot_labels "$boot_fixture/invalid-grub.cfg" "$boot_fixture/live.cfg"
 
 install_function=$(sed -n '/^install_packages_and_hooks()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")
-# shellcheck disable=SC2016
-if grep -Fq 'boot_branding_temp=$(with_temp_dir)' <<<"$install_function" &&
-    grep -Fq '"$boot_branding_temp/grub.cfg"' <<<"$install_function" &&
-    grep -Fq 'sudo install -m 0644 "$boot_branding_temp/grub.cfg"' \
-        <<<"$install_function" &&
-    grep -Fq 'sudo install -m 0644 "$boot_branding_temp/isolinux-live.cfg"' \
-        <<<"$install_function" &&
-    ! grep -Fq 'grub-theme.txt' <<<"$install_function" &&
-    ! grep -Fq 'splash.png' <<<"$install_function" &&
-    ! grep -Fq 'chmod u+w' <<<"$install_function"; then
-    pass "ISO boot-label branding stages only GRUB and ISOLINUX configuration"
+    "$PROJECT_ROOT/tools/vnmint-build")
+if grep -Fq "validate_mint_boot_labels \"\$ISO_TREE/boot/grub/grub.cfg\"" <<<"$install_function" &&
+    ! grep -Fq 'sed -i' <<<"$install_function" &&
+    ! grep -Fq "sudo install -m 0644 \"\$boot_" <<<"$install_function"; then
+    pass "Customization validates but does not rewrite Mint boot menus"
 else
-    fail "ISO boot-label branding stages only GRUB and ISOLINUX configuration"
+    fail "Customization validates but does not rewrite Mint boot menus"
 fi
 
-repack_function=$(sed -n '/^repack_iso()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
-required_iso_mappings=(
-    '/casper/initrd.lz'
-    '/boot/grub/grub.cfg'
-    '/isolinux/live.cfg'
-)
-mapping_complete=true
-for required_mapping in "${required_iso_mappings[@]}"; do
-    grep -Fq -- "-map \"\$ISO_TREE${required_mapping}\" ${required_mapping}" \
-        <<<"$repack_function" || mapping_complete=false
-done
-if [[ "$mapping_complete" == true ]] &&
-    ! grep -Fq '/boot/grub/live-theme/theme.txt' <<<"$repack_function" &&
-    ! grep -Fq '/isolinux/splash.png' <<<"$repack_function"; then
-    pass "ISO repack maps only the rebuilt initramfs and branded menu labels"
+repack_function=$(sed -n '/^repack_iso()/,/^}/p' "$PROJECT_ROOT/tools/vnmint-build")
+if grep -Fq -- "-map \"\$ISO_TREE/casper/initrd.lz\" /casper/initrd.lz" <<<"$repack_function" &&
+    ! grep -Fq -- "-map \"\$ISO_TREE/boot/grub/grub.cfg\"" <<<"$repack_function" &&
+    ! grep -Fq -- "-map \"\$ISO_TREE/isolinux/live.cfg\"" <<<"$repack_function" &&
+    ! grep -Fq -- '-volid' <<<"$repack_function"; then
+    pass "ISO repack preserves Mint menus and volume identity"
 else
-    fail "ISO repack maps only the rebuilt initramfs and branded menu labels"
+    fail "ISO repack preserves Mint menus and volume identity"
 fi
 
-plymouth_hook=$(<"$PROJECT_ROOT/config/hooks/0100-napos-branding.sh")
-plymouth_theme="$PROJECT_ROOT/config/overlay/usr/share/plymouth/themes/napos-logo/napos-logo.plymouth"
-plymouth_text="$PROJECT_ROOT/config/overlay/usr/share/plymouth/themes/napos-text/napos-text.plymouth"
-if [[ -s "$plymouth_theme" && -s "$plymouth_text" ]] &&
-    grep -Fq 'ModuleName=two-step' "$plymouth_theme" &&
-    grep -Fq 'MessageBelowAnimation=true' "$plymouth_theme" &&
-    grep -Fq 'ModuleName=details' "$plymouth_text" &&
-    [[ "$(grep -Fc ' 300' <<<"$plymouth_hook")" -eq 2 ]] &&
-    grep -Fq 'update-initramfs -u -k all' <<<"$plymouth_hook" &&
-    grep -Fq "grep -Fq 'mint-logo'" <<<"$plymouth_hook"; then
-    pass "Plymouth themes preserve prompts, register at priority 300, and reject Mint initramfs artwork"
+customization_hook=$(<"$PROJECT_ROOT/config/hooks/0100-customize-system.sh")
+if grep -Fq 'update-initramfs -u -k all' <<<"$customization_hook" &&
+    grep -Fq "grep -Fq 'mint-logo'" <<<"$customization_hook" &&
+    ! grep -Fq 'update-alternatives --set' <<<"$customization_hook"; then
+    pass "Initramfs rebuild preserves the Linux Mint Plymouth selection"
 else
-    fail "Plymouth themes preserve prompts, register at priority 300, and reject Mint initramfs artwork"
+    fail "Initramfs rebuild preserves the Linux Mint Plymouth selection"
 fi
 
-assert_png_dimensions() {
-    local path=$1
-    local dimensions=$2
-    file "$path" | grep -Fq "PNG image data, ${dimensions/x/ x },"
-}
-expect_success "Plymouth logo is a 128x128 RGBA PNG" assert_png_dimensions \
-    "$PROJECT_ROOT/config/overlay/usr/share/plymouth/themes/napos-logo/napos-logo.png" 128x128
-
-grub_defaults="$PROJECT_ROOT/config/overlay/etc/default/grub.d/99-napos-branding.cfg"
-if grep -Fqx 'GRUB_DISTRIBUTOR="Ubuntu"' "$grub_defaults" &&
-    grep -Fqx 'GRUB_VISIBLE_DISTRIBUTOR="NapOS"' "$grub_defaults" &&
-    ! grep -Fq 'GRUB_BACKGROUND=' "$grub_defaults" &&
-    grep -Fq "grep -Fqx '. /etc/default/grub.d/99-napos-branding.cfg'" \
-        "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
-    pass "Installed GRUB uses NapOS labels with the compatible EFI ID and base background"
+if [[ -z "$(find "$PROJECT_ROOT/config/overlay/etc/default/grub.d" -type f -print -quit 2>/dev/null)" ]] &&
+    ! grep -Fq '/etc/grub.d/' <<<"$customization_hook"; then
+    pass "Installed GRUB configuration is inherited from Linux Mint"
 else
-    fail "Installed GRUB uses NapOS labels with the compatible EFI ID and base background"
+    fail "Installed GRUB configuration is inherited from Linux Mint"
 fi
 
-if [[ ! -e "$PROJECT_ROOT/config/overlay/usr/share/glib-2.0/schemas/99-napos-branding.gschema.override" ]] &&
-    ! grep -Fq 'glib-compile-schemas' "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
-    pass "Slick Greeter branding remains inherited from the base image"
+if [[ ! -d "$PROJECT_ROOT/config/overlay/usr/share/glib-2.0/schemas" ]] &&
+    ! grep -Fq 'glib-compile-schemas' "$PROJECT_ROOT/config/hooks/0100-customize-system.sh"; then
+    pass "Slick Greeter branding remains inherited from Linux Mint"
 else
-    fail "Slick Greeter branding remains inherited from the base image"
+    fail "Slick Greeter branding remains inherited from Linux Mint"
 fi
 
 ubiquity_overlays=(
-    config/overlay/usr/share/icons/hicolor/scalable/apps/napos-logo.png
     config/overlay/usr/share/ubiquity-slideshow/slides/applications.html
     config/overlay/usr/share/ubiquity-slideshow/slides/directory.jsonp
     config/overlay/usr/share/ubiquity-slideshow/slides/index.html
@@ -1275,39 +1244,40 @@ for ubiquity_overlay in "${ubiquity_overlays[@]}"; do
     [[ ! -e "$PROJECT_ROOT/$ubiquity_overlay" ]] || ubiquity_overlays_absent=false
 done
 if [[ "$ubiquity_overlays_absent" == true ]] &&
-    ! grep -Fq 'Branding Ubiquity artwork' "$PROJECT_ROOT/config/hooks/0100-napos-branding.sh"; then
-    pass "Ubiquity artwork and slides remain inherited from the base image"
+    ! grep -Fq '/usr/share/applications/ubiquity.desktop' <<<"$customization_hook"; then
+    pass "Ubiquity metadata, artwork, and slides remain inherited from Linux Mint"
 else
-    fail "Ubiquity artwork and slides remain inherited from the base image"
+    fail "Ubiquity metadata, artwork, and slides remain inherited from Linux Mint"
 fi
 
-if [[ ! -e "$PROJECT_ROOT/config/overlay/usr/share/backgrounds/napos/napos-boot-splash.png" ]] &&
-    ! grep -Fq 'GRUB_BACKGROUND=' "$grub_defaults" &&
-    ! grep -Fq 'napos-boot-splash' "$PROJECT_ROOT/tools/napos-build"; then
-    pass "GRUB and ISOLINUX backgrounds remain inherited from the base image"
+if ! grep -Fq 'GRUB_BACKGROUND=' <<<"$customization_hook" &&
+    ! grep -Fq 'splash.png' "$PROJECT_ROOT/tools/vnmint-build"; then
+    pass "GRUB and ISOLINUX backgrounds remain inherited from Linux Mint"
 else
-    fail "GRUB and ISOLINUX backgrounds remain inherited from the base image"
+    fail "GRUB and ISOLINUX backgrounds remain inherited from Linux Mint"
 fi
 
 verify_extract_function=$(sed -n '/^extract_verification_files()/,/^}/p' \
-    "$PROJECT_ROOT/tools/napos-build")
+    "$PROJECT_ROOT/tools/vnmint-build")
 # shellcheck disable=SC2016
 if grep -Fq -- '-extract /casper/initrd.lz' <<<"$verify_extract_function" &&
     grep -Fq -- '-extract /boot/grub/grub.cfg' <<<"$verify_extract_function" &&
     grep -Fq -- '-extract /isolinux/live.cfg' <<<"$verify_extract_function" &&
     ! grep -Fq -- '-extract /boot/grub/live-theme/theme.txt' <<<"$verify_extract_function" &&
     ! grep -Fq -- '-extract /isolinux/splash.png' <<<"$verify_extract_function" &&
-    grep -Fq 'lsinitramfs "$temp/initrd.lz"' "$PROJECT_ROOT/tools/napos-build" &&
+    grep -Fq 'lsinitramfs "$temp/initrd.lz"' "$PROJECT_ROOT/tools/vnmint-build" &&
+    grep -Fq 'Linux Mint $BASE_VERSION Cinnamon 64-bit' "$PROJECT_ROOT/tools/vnmint-build" &&
+    grep -Fq 'Icon=mintubiquity' "$PROJECT_ROOT/tools/vnmint-build" &&
     grep -Fq 'initramfs-tools-core' "$PROJECT_ROOT/.github/workflows/release.yml"; then
-    pass "Verification inspects only branded labels and Plymouth initramfs content"
+    pass "Verification enforces Linux Mint boot, installer, and Plymouth branding"
 else
-    fail "Verification inspects only branded labels and Plymouth initramfs content"
+    fail "Verification enforces Linux Mint boot, installer, and Plymouth branding"
 fi
 
-if rg -n --fixed-strings '0.1.0' "$PROJECT_ROOT/tools/napos-build" >/dev/null; then
-    fail "Build implementation avoids a hard-coded NapOS release version"
+if rg -n --fixed-strings '0.1.0' "$PROJECT_ROOT/tools/vnmint-build" >/dev/null; then
+    fail "Build implementation avoids a hard-coded vnmint release version"
 else
-    pass "Build implementation avoids a hard-coded NapOS release version"
+    pass "Build implementation avoids a hard-coded vnmint release version"
 fi
 
 for target in help doctor fetch dev release verify inspect test clean-work clean-cache; do
@@ -1315,30 +1285,33 @@ for target in help doctor fetch dev release verify inspect test clean-work clean
 done
 pass "Required Make interface is present"
 
-if sed -n '/^prepare_work_tree()/,/^}/p' "$PROJECT_ROOT/tools/napos-build" |
+if sed -n '/^prepare_work_tree()/,/^}/p' "$PROJECT_ROOT/tools/vnmint-build" |
     grep -Fq "sudo rm -f -- \"\$ISO_TREE/casper/filesystem.squashfs\""; then
     pass "Read-only Casper SquashFS is removed with build privileges"
 else
     fail "Read-only Casper SquashFS is removed with build privileges"
 fi
 
-if sed -n '/^write_iso_md5s()/,/^}/p' "$PROJECT_ROOT/tools/napos-build" |
+if sed -n '/^write_iso_md5s()/,/^}/p' "$PROJECT_ROOT/tools/vnmint-build" |
     grep -Fq "mv -f -- \"\$temporary_md5\" \"\$ISO_TREE/md5sum.txt\""; then
     pass "Read-only ISO checksum manifest is replaced non-interactively"
 else
     fail "Read-only ISO checksum manifest is replaced non-interactively"
 fi
 
-github_prepare=$(sed -n '/^prepare_github_work_tree()/,/^}/p' "$PROJECT_ROOT/tools/napos-build")
+github_prepare=$(sed -n '/^prepare_github_work_tree()/,/^}/p' "$PROJECT_ROOT/tools/vnmint-build")
 # shellcheck disable=SC2016
 if grep -Fq 'xorriso -osirrox on -indev "$base_iso" -extract / "$ISO_TREE"' \
     <<<"$github_prepare" &&
     grep -Fq 'sudo unsquashfs -no-progress -d "$ROOTFS"' <<<"$github_prepare" &&
+    grep -Fq 'usr/lib/os-release' <<<"$github_prepare" &&
+    grep -Fq 'usr/share/applications/ubiquity.desktop' <<<"$github_prepare" &&
+    grep -Fq 'var/lib/dpkg/alternatives/default.plymouth' <<<"$github_prepare" &&
     ! grep -Fq 'BASE_CACHE_DIR' <<<"$github_prepare" &&
     ! grep -Fq 'rsync' <<<"$github_prepare"; then
-    pass "GitHub preparation avoids a duplicate expanded base cache"
+    pass "GitHub preparation retains Mint references without a duplicate base cache"
 else
-    fail "GitHub preparation avoids a duplicate expanded base cache"
+    fail "GitHub preparation retains Mint references without a duplicate base cache"
 fi
 
 ci_workflow="$PROJECT_ROOT/.github/workflows/ci.yml"
@@ -1364,14 +1337,41 @@ if grep -Fq 'compression-level: 0' "$release_workflow" &&
     grep -Fq 'retention-days: 1' "$release_workflow" &&
     grep -Fq 'cache/downloads/${{ steps.build-config.outputs.base_sha256 }}' "$release_workflow" &&
     grep -Fq 'cache/gnupg' "$release_workflow" &&
+    grep -Fq 'artifact_base=vnmint-$VNMINT_VERSION-$VNMINT_EDITION-$VNMINT_ARCH' \
+        "$release_workflow" &&
+    grep -Fq 'group: vnmint-release' "$release_workflow" &&
     ! grep -Eq 'uses: [^ ]+@v[0-9]' "$ci_workflow" "$release_workflow"; then
     pass "Release artifact and cache policies are bounded and actions are SHA-pinned"
 else
     fail "Release artifact and cache policies are bounded and actions are SHA-pinned"
 fi
 
+if [[ -s "$PROJECT_ROOT/public/vnmint-preview.png" ]] &&
+    grep -Fq 'public/vnmint-preview.png' "$PROJECT_ROOT/README.md"; then
+    pass "Preview asset uses the vnmint project filename"
+else
+    fail "Preview asset uses the vnmint project filename"
+fi
+
+retired_name=$(printf '\116\141\160\117\123')
+if find "$PROJECT_ROOT" \
+        \( -path "$PROJECT_ROOT/.git" -o -path "$PROJECT_ROOT/cache" \
+            -o -path "$PROJECT_ROOT/work" -o -path "$PROJECT_ROOT/dist" \) -prune -o \
+        -print | grep -qi "$retired_name"; then
+    fail "Retired project identity is absent from current source paths"
+else
+    pass "Retired project identity is absent from current source paths"
+fi
+if rg -i -l "$retired_name" "$PROJECT_ROOT" --hidden \
+    --glob '!.git/**' --glob '!cache/**' --glob '!work/**' --glob '!dist/**' \
+    --glob '!public/*.png' >/dev/null; then
+    fail "Retired project identity is absent from current source text"
+else
+    pass "Retired project identity is absent from current source text"
+fi
+
 if (( failures > 0 )); then
     printf '\n%d self-test(s) failed.\n' "$failures" >&2
     exit 1
 fi
-printf '\nAll NapOS non-networked tests passed.\n'
+printf '\nAll vnmint non-networked tests passed.\n'

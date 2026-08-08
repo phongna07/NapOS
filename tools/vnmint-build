@@ -35,7 +35,7 @@ cleanup_temp_paths() {
     local path
     for path in "${TEMP_PATHS[@]:-}"; do
         [[ -n "$path" && -e "$path" ]] || continue
-        if [[ "$path" == "${TMPDIR:-/tmp}"/napos.* ]]; then
+        if [[ "$path" == "${TMPDIR:-/tmp}"/vnmint.* ]]; then
             rm -rf -- "$path" 2>/dev/null || true
         fi
     done
@@ -70,36 +70,36 @@ trap 'on_signal TERM' TERM
 
 usage() {
     cat <<EOF
-NapOS automated Linux Mint ISO-remaster workflow
+vnmint automated Linux Mint ISO-remaster workflow
 
 Usage:
-  tools/napos-build help
-  tools/napos-build doctor
-  tools/napos-build fetch
-  tools/napos-build build dev
-  tools/napos-build build release
-  tools/napos-build verify [ISO]
-  tools/napos-build inspect [ISO]
-  tools/napos-build clean-work
-  tools/napos-build clean-cache
+  tools/vnmint-build help
+  tools/vnmint-build doctor
+  tools/vnmint-build fetch
+  tools/vnmint-build build dev
+  tools/vnmint-build build release
+  tools/vnmint-build verify [ISO]
+  tools/vnmint-build inspect [ISO]
+  tools/vnmint-build clean-work
+  tools/vnmint-build clean-cache
 
 Preferred interface:
   make doctor   Validate native/WSL2 Ubuntu amd64, tools, storage, sudo, and mounts
   make fetch    Authenticate and cache Linux Mint, applications, input method, and theme
   make dev      Build and verify an LZ4 development ISO
   make release  Build and verify an XZ release ISO
-  make verify ISO=dist/NapOS-...iso
-  make inspect ISO=dist/NapOS-...iso
-  make test     Run non-networked safety and branding checks
+  make verify ISO=dist/vnmint-...iso
+  make inspect ISO=dist/vnmint-...iso
+  make test     Run non-networked safety, configuration, and Mint-preservation checks
 
 Generated files are written below dist/. Builds are not byte-reproducible
 because package versions are resolved from live Mint, Ubuntu, Google,
 ONLYOFFICE, and Fcitx5 Lotus repositories.
 
 Development artifacts:
-  dist/NapOS-${NAPOS_VERSION}-dev-${NAPOS_EDITION}-${NAPOS_ARCH}.iso
-  dist/NapOS-${NAPOS_VERSION}-dev-${NAPOS_EDITION}-${NAPOS_ARCH}.iso.sha256
-  dist/NapOS-${NAPOS_VERSION}-dev-${NAPOS_EDITION}-${NAPOS_ARCH}.build-info.json
+  dist/vnmint-${VNMINT_VERSION}-dev-${VNMINT_EDITION}-${VNMINT_ARCH}.iso
+  dist/vnmint-${VNMINT_VERSION}-dev-${VNMINT_EDITION}-${VNMINT_ARCH}.iso.sha256
+  dist/vnmint-${VNMINT_VERSION}-dev-${VNMINT_EDITION}-${VNMINT_ARCH}.build-info.json
   dist/build-dev.log
 
 Release artifacts use the same names without the -dev suffix.
@@ -177,7 +177,7 @@ validate_cinnamon_desktop_defaults() {
 
 validate_cinnamon_menu_icon_defaults() {
     local menu_settings=$1
-    local expected_icon=/usr/share/icons/hicolor/scalable/apps/napos-logo.svg
+    local expected_icon=linuxmint-logo-ring-symbolic
     jq -e --arg expected_icon "$expected_icon" '
         .["menu-custom"].default == true and
         .["menu-icon"].default == $expected_icon and
@@ -185,36 +185,21 @@ validate_cinnamon_menu_icon_defaults() {
     ' <<<"$menu_settings" >/dev/null
 }
 
-brand_iso_boot_labels() {
+validate_mint_boot_labels() {
     local grub_cfg=$1
     local isolinux_cfg=$2
-    local grub_kernel_before grub_kernel_after isolinux_kernel_before isolinux_kernel_after path
+    local path
     for path in "$grub_cfg" "$isolinux_cfg"; do
         [[ -s "$path" ]] || return 1
     done
-    grub_kernel_before=$(grep -E '^[[:space:]]*(linux|initrd)[[:space:]]' "$grub_cfg" | sha256sum)
-    isolinux_kernel_before=$(grep -E '^[[:space:]]*(kernel|linux|append)[[:space:]]' \
-        "$isolinux_cfg" | sha256sum)
-    sed -Ei \
-        -e 's/menuentry "Start Linux Mint[^"]* \(compatibility mode\)"/menuentry "Start NapOS (compatibility mode)"/' \
-        -e 's/menuentry "Start Linux Mint[^"]*"/menuentry "Start NapOS"/' \
-        "$grub_cfg"
-    sed -Ei \
-        -e 's/^menu title Welcome to Linux Mint.*$/menu title Welcome to NapOS/' \
-        -e 's/^([[:space:]]*menu label )Start Linux Mint in compatibility mode$/\1Start NapOS in compatibility mode/' \
-        -e 's/^([[:space:]]*menu label )Start Linux Mint$/\1Start NapOS/' \
-        "$isolinux_cfg"
-    grub_kernel_after=$(grep -E '^[[:space:]]*(linux|initrd)[[:space:]]' "$grub_cfg" | sha256sum)
-    isolinux_kernel_after=$(grep -E '^[[:space:]]*(kernel|linux|append)[[:space:]]' \
-        "$isolinux_cfg" | sha256sum)
-    [[ "$grub_kernel_before" == "$grub_kernel_after" ]] || return 1
-    [[ "$isolinux_kernel_before" == "$isolinux_kernel_after" ]] || return 1
-    grep -Fq 'menuentry "Start NapOS"' "$grub_cfg" || return 1
-    grep -Fq 'menuentry "Start NapOS (compatibility mode)"' "$grub_cfg" || return 1
-    grep -Fq 'menu label Start NapOS' "$isolinux_cfg" || return 1
-    grep -Fq 'menu label Start NapOS in compatibility mode' "$isolinux_cfg" || return 1
-    ! grep -Fq 'Linux Mint' "$grub_cfg" || return 1
-    ! grep -Fq 'Linux Mint' "$isolinux_cfg"
+    grep -Fq "menuentry \"Start Linux Mint $BASE_VERSION Cinnamon 64-bit\"" \
+        "$grub_cfg" || return 1
+    grep -Fq "menuentry \"Start Linux Mint $BASE_VERSION Cinnamon 64-bit (compatibility mode)\"" \
+        "$grub_cfg" || return 1
+    grep -Fq "menu title Welcome to Linux Mint $BASE_VERSION 64-bit" \
+        "$isolinux_cfg" || return 1
+    grep -Fq 'menu label Start Linux Mint' "$isolinux_cfg" || return 1
+    grep -Fq 'menu label Start Linux Mint in compatibility mode' "$isolinux_cfg"
 }
 
 validate_cinnamon_launcher_defaults() {
@@ -358,7 +343,7 @@ check_ubuntu_host() {
 }
 
 check_host_architecture() {
-    [[ "$NAPOS_ARCH" == "amd64" ]] || return 1
+    [[ "$VNMINT_ARCH" == "amd64" ]] || return 1
     [[ "$(dpkg --print-architecture 2>/dev/null)" == "amd64" ]]
 }
 
@@ -441,7 +426,7 @@ cmd_doctor() {
     if (( DOCTOR_FAILURES > 0 )); then
         die "Environment doctor found $DOCTOR_FAILURES failed requirement(s)."
     fi
-    ok "Configuration is valid: $NAPOS_NAME $NAPOS_VERSION on Mint $BASE_VERSION"
+    ok "Configuration is valid: vnmint $VNMINT_VERSION on Linux Mint $BASE_VERSION"
 }
 
 log_disk_usage() {
@@ -516,7 +501,7 @@ verify_signed_manifest() {
     local signature=$2
     local gnupg_home="$CACHE_DIR/gnupg"
     local status_file valid_fingerprint manifest_hash
-    status_file=$(mktemp "${TMPDIR:-/tmp}/napos.gpg.XXXXXXXX")
+    status_file=$(mktemp "${TMPDIR:-/tmp}/vnmint.gpg.XXXXXXXX")
     TEMP_PATHS+=("$status_file")
 
     gpg --homedir "$gnupg_home" --batch --status-fd 1 \
@@ -887,7 +872,7 @@ cmd_fetch() {
     validate_config
     mkdir -p "$CACHE_DIR"
     exec 8>"$CACHE_DIR/.fetch.lock"
-    flock -n 8 || die "Another NapOS fetch holds $CACHE_DIR/.fetch.lock"
+    flock -n 8 || die "Another vnmint fetch holds $CACHE_DIR/.fetch.lock"
     mkdir -p "$DOWNLOAD_DIR"
     ensure_mint_key
     download_atomic "$BASE_MIRROR/sha256sum.txt" "$manifest"
@@ -1011,7 +996,24 @@ prepare_work_tree() {
 }
 
 prepare_github_work_tree() {
-    local base_iso boot_report
+    local base_iso boot_report preserved_path
+    local preserved_paths=(
+        usr/lib/os-release
+        etc/os-release
+        etc/issue
+        etc/issue.net
+        etc/lsb-release
+        etc/linuxmint/info
+        etc/default/grub.d/50_linuxmint.cfg
+        etc/grub.d/10_linux
+        etc/grub.d/10_linux_zfs
+        etc/grub.d/20_linux_xen
+        usr/share/applications/ubiquity.desktop
+        usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json
+        usr/share/glib-2.0/schemas/mint-artwork.gschema.override
+        var/lib/dpkg/alternatives/default.plymouth
+        var/lib/dpkg/alternatives/text.plymouth
+    )
     base_iso=$(base_iso_path)
     mkdir -p "$WORK_DIR" "$DIST_DIR"
     cleanup_mounts "$ROOTFS"
@@ -1033,8 +1035,10 @@ prepare_github_work_tree() {
     grep -q 'BIOS' <<<"$boot_report" || die "Base ISO has no legacy BIOS boot entry."
     grep -Eq 'UEFI|EFI' <<<"$boot_report" || die "Base ISO has no EFI boot entry."
 
-    sudo mkdir -p "$BASE_REFERENCE_DIR/etc"
-    sudo cp -a "$ROOTFS/etc/lsb-release" "$BASE_REFERENCE_DIR/etc/lsb-release"
+    for preserved_path in "${preserved_paths[@]}"; do
+        sudo mkdir -p "$BASE_REFERENCE_DIR/$(dirname "$preserved_path")"
+        sudo cp -a "$ROOTFS/$preserved_path" "$BASE_REFERENCE_DIR/$preserved_path"
+    done
     sudo cp -a "$ROOTFS/etc/apt" "$BASE_REFERENCE_DIR/etc/apt"
     sudo rm -f -- "$ISO_TREE/casper/filesystem.squashfs"
     printf 'sha256=%s\n' "$BASE_ISO_SHA256" >"$META_DIR/source"
@@ -1075,7 +1079,7 @@ mount_chroot() {
 }
 
 install_packages_and_hooks() {
-    local hook hook_name command theme_temp boot_branding_temp
+    local hook hook_name command theme_temp
     [[ -f "$CHROME_DEB_PATH" ]] || die "Authenticated Google Chrome package is unavailable."
     [[ -f "$ONLYOFFICE_DEB_PATH" ]] || die "Authenticated ONLYOFFICE package is unavailable."
     [[ -f "$FCITX5_LOTUS_DEB_PATH" ]] || die "Authenticated Fcitx5 Lotus package is unavailable."
@@ -1085,21 +1089,21 @@ install_packages_and_hooks() {
     save_and_enable_dns
     printf '#!/bin/sh\nexit 101\n' | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" >/dev/null
     sudo chmod 0755 "$ROOTFS/usr/sbin/policy-rc.d"
-    sudo install -m 0644 "$CONFIG_DIR/packages.txt" "$ROOTFS/tmp/napos-packages.txt"
-    sudo install -m 0644 "$CONFIG_DIR/packages-remove.txt" "$ROOTFS/tmp/napos-packages-remove.txt"
-    sudo install -m 0644 "$CHROME_DEB_PATH" "$ROOTFS/tmp/napos-google-chrome.deb"
-    sudo install -m 0644 "$ONLYOFFICE_DEB_PATH" "$ROOTFS/tmp/napos-onlyoffice.deb"
-    sudo install -m 0644 "$FCITX5_LOTUS_DEB_PATH" "$ROOTFS/tmp/napos-fcitx5-lotus.deb"
+    sudo install -m 0644 "$CONFIG_DIR/packages.txt" "$ROOTFS/tmp/remix-packages.txt"
+    sudo install -m 0644 "$CONFIG_DIR/packages-remove.txt" "$ROOTFS/tmp/remix-packages-remove.txt"
+    sudo install -m 0644 "$CHROME_DEB_PATH" "$ROOTFS/tmp/remix-google-chrome.deb"
+    sudo install -m 0644 "$ONLYOFFICE_DEB_PATH" "$ROOTFS/tmp/remix-onlyoffice.deb"
+    sudo install -m 0644 "$FCITX5_LOTUS_DEB_PATH" "$ROOTFS/tmp/remix-fcitx5-lotus.deb"
     sudo mkdir -p "$ROOTFS/usr/share/keyrings"
     sudo install -m 0644 "$FCITX5_LOTUS_KEY_PATH" "$ROOTFS/usr/share/keyrings/fcitx5-lotus.gpg"
-    sudo mkdir -p "$ROOTFS/tmp/napos-maintscript-bin"
+    sudo mkdir -p "$ROOTFS/tmp/remix-maintscript-bin"
     for command in modprobe udevadm systemctl killall; do
-        printf '#!/bin/sh\nexit 0\n' | sudo tee "$ROOTFS/tmp/napos-maintscript-bin/$command" >/dev/null
-        sudo chmod 0755 "$ROOTFS/tmp/napos-maintscript-bin/$command"
+        printf '#!/bin/sh\nexit 0\n' | sudo tee "$ROOTFS/tmp/remix-maintscript-bin/$command" >/dev/null
+        sudo chmod 0755 "$ROOTFS/tmp/remix-maintscript-bin/$command"
     done
-    sudo mkdir -p "$ROOTFS/tmp/napos-hooks"
+    sudo mkdir -p "$ROOTFS/tmp/remix-hooks"
     if compgen -G "$CONFIG_DIR/hooks/*.sh" >/dev/null; then
-        sudo cp "$CONFIG_DIR"/hooks/*.sh "$ROOTFS/tmp/napos-hooks/"
+        sudo cp "$CONFIG_DIR"/hooks/*.sh "$ROOTFS/tmp/remix-hooks/"
     fi
 
     mount_chroot
@@ -1111,15 +1115,15 @@ install_packages_and_hooks() {
             printf "%s\n" \
                 "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula boolean true" |
                 debconf-set-selections
-            sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/napos-packages.txt |
+            sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/remix-packages.txt |
                 xargs -r apt-get install -y --no-install-recommends
-            apt-get install -y --no-install-recommends /tmp/napos-google-chrome.deb
-            apt-get install -y --no-install-recommends /tmp/napos-onlyoffice.deb
-            /usr/bin/env LOGNAME=root PATH=/tmp/napos-maintscript-bin:/usr/sbin:/usr/bin:/sbin:/bin \
-                apt-get install -y --no-install-recommends /tmp/napos-fcitx5-lotus.deb
+            apt-get install -y --no-install-recommends /tmp/remix-google-chrome.deb
+            apt-get install -y --no-install-recommends /tmp/remix-onlyoffice.deb
+            /usr/bin/env LOGNAME=root PATH=/tmp/remix-maintscript-bin:/usr/sbin:/usr/bin:/sbin:/bin \
+                apt-get install -y --no-install-recommends /tmp/remix-fcitx5-lotus.deb
             systemd-sysusers
             rm -f /etc/systemd/system/multi-user.target.wants/fcitx5-lotus-server@root.service
-            sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/napos-packages-remove.txt |
+            sed -e "/^[[:space:]]*#/d" -e "/^[[:space:]]*$/d" /tmp/remix-packages-remove.txt |
                 xargs -r apt-get purge -y --
         '
 
@@ -1139,7 +1143,7 @@ install_packages_and_hooks() {
     sudo rsync -aH "$theme_temp/$WINDOWS_10_DARK_THEME_UUID/" \
         "$ROOTFS/usr/share/themes/$WINDOWS_10_DARK_THEME_UUID/"
 
-    log "Applying the NapOS filesystem overlay..."
+    log "Applying the vnmint filesystem overlay..."
     sudo rsync -aHAX "$CONFIG_DIR/overlay/" "$ROOTFS/"
 
     for hook in "$CONFIG_DIR"/hooks/*.sh; do
@@ -1149,34 +1153,38 @@ install_packages_and_hooks() {
         sudo chroot "$ROOTFS" /usr/bin/env -i \
             HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin \
             DEBIAN_FRONTEND=noninteractive \
-            NAPOS_NAME="$NAPOS_NAME" NAPOS_ID="$NAPOS_ID" NAPOS_VERSION="$NAPOS_VERSION" \
-            NAPOS_EDITION="$NAPOS_EDITION" BASE_VERSION="$BASE_VERSION" BASE_CODENAME="$BASE_CODENAME" \
             UBUNTU_CODENAME="$UBUNTU_CODENAME" DEFAULT_LOCALE="$DEFAULT_LOCALE" \
-            DEFAULT_TIMEZONE="$DEFAULT_TIMEZONE" BUILD_PROFILE="$BUILD_PROFILE" \
-            BUILD_ID="$BUILD_ID" BUILD_TIMESTAMP="$BUILD_TIMESTAMP" \
-            /bin/bash "/tmp/napos-hooks/$hook_name"
+            DEFAULT_TIMEZONE="$DEFAULT_TIMEZONE" \
+            /bin/bash "/tmp/remix-hooks/$hook_name"
     done
 
-    log "Installing the rebuilt NapOS initramfs and branding ISO boot menus..."
-    boot_branding_temp=$(with_temp_dir)
-    TEMP_PATHS+=("$boot_branding_temp")
-    cp "$ISO_TREE/boot/grub/grub.cfg" "$boot_branding_temp/grub.cfg"
-    cp "$ISO_TREE/isolinux/live.cfg" "$boot_branding_temp/isolinux-live.cfg"
-    brand_iso_boot_labels \
-        "$boot_branding_temp/grub.cfg" \
-        "$boot_branding_temp/isolinux-live.cfg" ||
-        die "Failed to brand the ISO boot menus without changing their boot arguments."
+    log "Installing the rebuilt initramfs while preserving Linux Mint boot menus..."
+    validate_mint_boot_labels "$ISO_TREE/boot/grub/grub.cfg" "$ISO_TREE/isolinux/live.cfg" ||
+        die "Linux Mint boot menus changed before ISO repacking."
     sudo install -m 0644 -D "$ROOTFS/boot/initrd.img" "$ISO_TREE/casper/initrd.lz"
-    sudo install -m 0644 "$boot_branding_temp/grub.cfg" \
-        "$ISO_TREE/boot/grub/grub.cfg"
-    sudo install -m 0644 "$boot_branding_temp/isolinux-live.cfg" \
-        "$ISO_TREE/isolinux/live.cfg"
 }
 
 validate_customized_rootfs() {
     local package chrome_key_fingerprint chrome_source dconf_data base_reference
     local lotus_key_fingerprint lotus_source apt_conffile apt_package apt_path
-    local grouped_window_list panel_launchers menu_settings
+    local grouped_window_list panel_launchers menu_settings preserved_path
+    local preserved_paths=(
+        usr/lib/os-release
+        etc/os-release
+        etc/issue
+        etc/issue.net
+        etc/lsb-release
+        etc/linuxmint/info
+        etc/default/grub.d/50_linuxmint.cfg
+        etc/grub.d/10_linux
+        etc/grub.d/10_linux_zfs
+        etc/grub.d/20_linux_xen
+        usr/share/applications/ubiquity.desktop
+        usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json
+        usr/share/glib-2.0/schemas/mint-artwork.gschema.override
+        var/lib/dpkg/alternatives/default.plymouth
+        var/lib/dpkg/alternatives/text.plymouth
+    )
     local apt_conf_diff_args=(-qr)
     local apt_preferences_diff_args=(-qr)
     local apt_sources_diff_args=(
@@ -1202,36 +1210,30 @@ validate_customized_rootfs() {
     )
     sudo chroot "$ROOTFS" /usr/bin/env -i \
         HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-        NAPOS_VERSION="$NAPOS_VERSION" BASE_VERSION="$BASE_VERSION" \
+        BASE_VERSION="$BASE_VERSION" \
         BASE_CODENAME="$BASE_CODENAME" EXPECTED_UBUNTU_CODENAME="$UBUNTU_CODENAME" \
         DEFAULT_TIMEZONE="$DEFAULT_TIMEZONE" /bin/bash -euc '
         source /usr/lib/os-release
-        [[ "$NAME" == "NapOS" ]]
-        [[ "$PRETTY_NAME" == "NapOS $NAPOS_VERSION" ]]
+        [[ "$NAME" == "Linux Mint" ]]
+        [[ "$PRETTY_NAME" == "Linux Mint $BASE_VERSION" ]]
         [[ "$ID" == "linuxmint" ]]
         [[ "$VERSION_ID" == "$BASE_VERSION" ]]
         [[ "$VERSION_CODENAME" == "$BASE_CODENAME" ]]
         [[ "$UBUNTU_CODENAME" == "$EXPECTED_UBUNTU_CODENAME" ]]
-        [[ "$VARIANT" == "NapOS" ]]
-        [[ "$VARIANT_ID" == "napos" ]]
-        [[ -f /etc/napos-release ]]
         [[ "$(cat /etc/timezone)" == "$DEFAULT_TIMEZONE" ]]
         [[ "$(printf "GET ubiquity/use_nonfree\n" |
             debconf-communicate -fnoninteractive ubiquity)" == "0 true" ]]
         grep -qx "LANG=en_US.UTF-8" /etc/default/locale
-        [[ -f /usr/share/backgrounds/napos/napos-wallpaper.svg ]]
-        [[ -f /usr/share/icons/hicolor/scalable/apps/napos-logo.svg ]]
-        [[ -f /usr/share/plymouth/themes/napos-logo/napos-logo.plymouth ]]
-        [[ -f /usr/share/plymouth/themes/napos-text/napos-text.plymouth ]]
         [[ "$(readlink -f /usr/share/plymouth/themes/default.plymouth)" == \
-            /usr/share/plymouth/themes/napos-logo/napos-logo.plymouth ]]
+            /usr/share/plymouth/themes/mint-logo/mint-logo.plymouth ]]
         [[ "$(readlink -f /usr/share/plymouth/themes/text.plymouth)" == \
-            /usr/share/plymouth/themes/napos-text/napos-text.plymouth ]]
-        grep -Fqx "GRUB_DISTRIBUTOR=\"Ubuntu\"" /etc/default/grub.d/99-napos-branding.cfg
-        grep -Fqx "GRUB_VISIBLE_DISTRIBUTOR=\"NapOS\"" \
-            /etc/default/grub.d/99-napos-branding.cfg
+            /usr/share/plymouth/themes/mint-text/mint-text.plymouth ]]
         grep -Fqx "GRUB_DISTRIBUTOR=\"Ubuntu\"" /etc/default/grub.d/50_linuxmint.cfg
         [[ -s /etc/dconf/db/local ]]
+        mint_background_quote=$(printf "\047")
+        grep -Fqx "picture-uri=${mint_background_quote}file:///usr/share/backgrounds/linuxmint/default_background.jpg${mint_background_quote}" \
+            /usr/share/glib-2.0/schemas/mint-artwork.gschema.override
+        [[ -e /usr/share/backgrounds/linuxmint/default_background.jpg ]]
         [[ -f /usr/share/themes/Windows-10-Dark/index.theme ]]
         [[ -f /usr/share/themes/Windows-10-Dark/gtk-2.0/gtkrc ]]
         [[ -f /usr/share/themes/Windows-10-Dark/gtk-3.0/gtk.css ]]
@@ -1290,15 +1292,15 @@ validate_customized_rootfs() {
         grep -qx "Name=Lotus" /usr/share/fcitx5/inputmethod/lotus.conf
         [[ -f /etc/xdg/autostart/org.fcitx.Fcitx5.desktop ]]
         grep -q "^Exec=.*/fcitx5$" /etc/xdg/autostart/org.fcitx.Fcitx5.desktop
-        [[ -x /usr/libexec/napos-fcitx5-lotus-user ]]
-        [[ -f /etc/systemd/system/user@.service.d/50-napos-fcitx5-lotus.conf ]]
+        [[ -x /usr/libexec/fcitx5-lotus-user-resolver ]]
+        [[ -f /etc/systemd/system/user@.service.d/50-fcitx5-lotus.conf ]]
         grep -Fqx "Wants=fcitx5-lotus-server@%i.service" \
-            /etc/systemd/system/user@.service.d/50-napos-fcitx5-lotus.conf
-        [[ -f /etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf ]]
-        grep -Fqx "ExecCondition=/usr/libexec/napos-fcitx5-lotus-user --check %i" \
-            /etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf
-        grep -Fqx "ExecStart=/usr/libexec/napos-fcitx5-lotus-user --exec %i" \
-            /etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf
+            /etc/systemd/system/user@.service.d/50-fcitx5-lotus.conf
+        [[ -f /etc/systemd/system/fcitx5-lotus-server@.service.d/10-user-resolution.conf ]]
+        grep -Fqx "ExecCondition=/usr/libexec/fcitx5-lotus-user-resolver --check %i" \
+            /etc/systemd/system/fcitx5-lotus-server@.service.d/10-user-resolution.conf
+        grep -Fqx "ExecStart=/usr/libexec/fcitx5-lotus-user-resolver --exec %i" \
+            /etc/systemd/system/fcitx5-lotus-server@.service.d/10-user-resolution.conf
         [[ ! -e /etc/systemd/system/multi-user.target.wants/fcitx5-lotus-server@root.service ]]
         [[ -f /etc/skel/.config/fcitx5/profile ]]
         grep -qx "Name=keyboard-us" /etc/skel/.config/fcitx5/profile
@@ -1366,15 +1368,15 @@ validate_customized_rootfs() {
         [[ -f /usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json ]]
         [[ -f /usr/share/cinnamon/applets/panel-launchers@cinnamon.org/settings-schema.json ]]
         [[ -f /usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json ]]
-        grep -q "napos-wallpaper.svg" /etc/dconf/db/local.d/00-napos
-        grep -Rqs "Name=Install NapOS" /usr/share/applications
-        grep -Rqs "Name\[vi\]=Cài đặt NapOS" /usr/share/applications
-        grep -Rqs "Icon=napos-logo" /usr/share/applications
-    '
+        ! grep -Eq "^picture-uri=" /etc/dconf/db/local.d/00-desktop-defaults
+        grep -Fqx "Name=Install RELEASE" /usr/share/applications/ubiquity.desktop
+        grep -Fqx "Name[vi]=Cài đặt RELEASE" /usr/share/applications/ubiquity.desktop
+        grep -Fqx "Icon=mintubiquity" /usr/share/applications/ubiquity.desktop
+    ' || die "Customized rootfs content validation failed."
     sudo cmp -s "$ROOTFS/etc/skel/.config/fcitx5/profile" \
         "$CONFIG_DIR/overlay/etc/skel/.config/fcitx5/profile" ||
         die "Installed Fcitx5 profile differs from the English-first Lotus default."
-    dconf_data=$(sudo cat "$ROOTFS/etc/dconf/db/local.d/00-napos")
+    dconf_data=$(sudo cat "$ROOTFS/etc/dconf/db/local.d/00-desktop-defaults")
     validate_cinnamon_panel_defaults "$dconf_data" ||
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     validate_cinnamon_desktop_defaults "$dconf_data" ||
@@ -1386,7 +1388,7 @@ validate_customized_rootfs() {
     menu_settings=$(sudo cat \
         "$ROOTFS/usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json")
     validate_cinnamon_menu_icon_defaults "$menu_settings" ||
-        die "Cinnamon menu does not default to the NapOS icon."
+        die "Cinnamon menu does not preserve the Linux Mint icon."
     grouped_window_list=$(sudo cat \
         "$ROOTFS/usr/share/cinnamon/applets/grouped-window-list@cinnamon.org/settings-schema.json")
     panel_launchers=$(sudo cat \
@@ -1397,8 +1399,10 @@ validate_customized_rootfs() {
         "$ROOTFS/usr/share/applications" ||
         die "Default desktop shortcuts are missing, modified, non-executable, or include an installer."
     base_reference=$(base_reference_root)
-    sudo cmp -s "$ROOTFS/etc/lsb-release" "$base_reference/etc/lsb-release" ||
-        die "/etc/lsb-release changed; Mint technical identity must be preserved."
+    for preserved_path in "${preserved_paths[@]}"; do
+        sudo cmp -s "$ROOTFS/$preserved_path" "$base_reference/$preserved_path" ||
+            die "Linux Mint identity or branding file changed: /$preserved_path"
+    done
     for apt_conffile in "${apt_package_conffiles[@]}"; do
         IFS=: read -r apt_package apt_path <<<"$apt_conffile"
         verify_installed_conffile "$ROOTFS" "$apt_package" "$apt_path" ||
@@ -1460,11 +1464,6 @@ validate_customized_rootfs() {
         die "Installed Fcitx5 Lotus version differs from authenticated package metadata."
     [[ "$(sudo chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' ibus)" == ii* ]] ||
         die "IBus compatibility packages were unexpectedly purged."
-    if sudo grep -Rqs --exclude='napos-build' 'Napos' \
-        "$ROOTFS/etc/napos-release" "$ROOTFS/usr/lib/os-release" \
-        "$ROOTFS/usr/share/applications"; then
-        die 'Incorrect product capitalization "Napos" found in generated branding.'
-    fi
     ok "Customized rootfs assertions passed."
 }
 
@@ -1472,10 +1471,10 @@ clean_chroot() {
     log "Cleaning package and build state..."
     sudo chroot "$ROOTFS" /bin/bash -euxc '
         apt-get clean
-        rm -rf /var/lib/apt/lists/* /tmp/napos-hooks /tmp/napos-packages.txt \
-            /tmp/napos-packages-remove.txt /tmp/napos-google-chrome.deb \
-            /tmp/napos-onlyoffice.deb /tmp/napos-fcitx5-lotus.deb \
-            /tmp/napos-maintscript-bin
+        rm -rf /var/lib/apt/lists/* /tmp/remix-hooks /tmp/remix-packages.txt \
+            /tmp/remix-packages-remove.txt /tmp/remix-google-chrome.deb \
+            /tmp/remix-onlyoffice.deb /tmp/remix-fcitx5-lotus.deb \
+            /tmp/remix-maintscript-bin
         rm -f /usr/sbin/policy-rc.d /var/lib/dbus/machine-id
         : > /etc/machine-id
     '
@@ -1556,8 +1555,8 @@ write_build_info() {
     [[ "$profile" == "dev" ]] && compression="lz4" || compression="xz"
     elapsed=$(( $(date +%s) - BUILD_STARTED_AT ))
     jq -n \
-        --arg product "$NAPOS_NAME" \
-        --arg version "$NAPOS_VERSION" \
+        --arg product "vnmint" \
+        --arg version "$VNMINT_VERSION" \
         --arg build_id "$BUILD_ID" \
         --arg profile "$profile" \
         --arg compression "$compression" \
@@ -1637,15 +1636,12 @@ repack_iso() {
     output=$(output_iso_for_profile "$profile")
     tmp_output="$DIST_DIR/.${output##*/}.tmp.$$"
     rm -f -- "$tmp_output" "$output"
-    log "Replaying Mint's BIOS/EFI boot layout into the NapOS ISO..."
+    log "Replaying Linux Mint's BIOS/EFI layout and volume identity..."
     xorriso -indev "$base_iso" -outdev "$tmp_output" \
-        -volid "$ISO_VOLUME_ID" \
         -map "$ISO_TREE/casper/filesystem.squashfs" /casper/filesystem.squashfs \
         -map "$ISO_TREE/casper/filesystem.size" /casper/filesystem.size \
         -map "$ISO_TREE/casper/filesystem.manifest" /casper/filesystem.manifest \
         -map "$ISO_TREE/casper/initrd.lz" /casper/initrd.lz \
-        -map "$ISO_TREE/boot/grub/grub.cfg" /boot/grub/grub.cfg \
-        -map "$ISO_TREE/isolinux/live.cfg" /isolinux/live.cfg \
         -map "$ISO_TREE/md5sum.txt" /md5sum.txt \
         -boot_image any replay -commit -end
     mv -- "$tmp_output" "$output"
@@ -1696,7 +1692,8 @@ read_installer_launcher() {
 
 cmd_verify() {
     local iso temp boot_report pvd_report sidecar
-    local package napos_release os_release timezone installer locale_data dconf_data
+    local package os_release linuxmint_info issue issue_net timezone installer locale_data dconf_data
+    local mint_artwork_defaults
     local squashfs_report compression expected_compression base_iso initrd_listing
     local build_info chrome_source_file chrome_key_file chrome_key_fingerprint chrome_version
     local onlyoffice_version onlyoffice_launcher office_mime
@@ -1705,10 +1702,14 @@ cmd_verify() {
     local copyq_autostart flameshot_autostart mimeapps mint_mimeapps grouped_window_list
     local panel_launchers menu_settings theme_index theme_file
     local application_defaults desktop_launcher desktop_listing installer_shortcut
-    local grub_defaults plymouth_default_alternative plymouth_text_alternative
-    local grub_generator_path
+    local plymouth_default_alternative plymouth_text_alternative base_codename_title
     iso=$(resolve_iso_argument "${1:-}")
-    [[ "$(basename "$iso")" == NapOS-*.iso ]] || die "ISO filename must begin with NapOS-."
+    base_codename_title=${BASE_CODENAME^}
+    case "$(basename "$iso")" in
+        "vnmint-$VNMINT_VERSION-$VNMINT_EDITION-$VNMINT_ARCH.iso" | \
+            "vnmint-$VNMINT_VERSION-dev-$VNMINT_EDITION-$VNMINT_ARCH.iso") ;;
+        *) die "ISO filename does not match the configured vnmint artifact names." ;;
+    esac
     sidecar="${iso}.sha256"
     if [[ -f "$sidecar" ]]; then
         (cd "$(dirname "$iso")" && sha256sum -c "$(basename "$sidecar")") >/dev/null || die "ISO SHA-256 sidecar check failed."
@@ -1718,7 +1719,12 @@ cmd_verify() {
     fi
 
     pvd_report=$(xorriso -indev "$iso" -pvd_info 2>&1)
-    grep -q "$ISO_VOLUME_ID" <<<"$pvd_report" || die "Unexpected ISO volume ID."
+    grep -Fq "Volume id    : 'Linux Mint $BASE_VERSION Cinnamon 64-bit'" <<<"$pvd_report" ||
+        die "Linux Mint ISO volume ID was not preserved."
+    grep -Fq 'Publisher Id : LINUX MINT' <<<"$pvd_report" ||
+        die "Linux Mint ISO publisher was not preserved."
+    grep -Fq 'App Id       : LINUX MINT LIVE' <<<"$pvd_report" ||
+        die "Linux Mint ISO application ID was not preserved."
     boot_report=$(xorriso -indev "$iso" -report_el_torito plain 2>&1)
     grep -q 'BIOS' <<<"$boot_report" || die "Legacy BIOS boot entry is missing."
     grep -Eq 'UEFI|EFI' <<<"$boot_report" || die "EFI boot entry is missing."
@@ -1727,17 +1733,8 @@ cmd_verify() {
     temp=$(with_temp_dir)
     TEMP_PATHS+=("$temp")
     extract_verification_files "$iso" "$temp"
-    grep -Fq 'menuentry "Start NapOS"' "$temp/grub.cfg" ||
-        die "UEFI/GRUB menu does not contain Start NapOS."
-    grep -Fq 'menuentry "Start NapOS (compatibility mode)"' "$temp/grub.cfg" ||
-        die "UEFI/GRUB compatibility entry is not branded NapOS."
-    grep -Fq 'menu label Start NapOS' "$temp/isolinux-live.cfg" ||
-        die "BIOS/ISOLINUX menu does not contain Start NapOS."
-    grep -Fq 'menu label Start NapOS in compatibility mode' "$temp/isolinux-live.cfg" ||
-        die "BIOS/ISOLINUX compatibility entry is not branded NapOS."
-    if grep -Fq 'Linux Mint' "$temp/grub.cfg" "$temp/isolinux-live.cfg"; then
-        die "A visible Linux Mint boot-menu label remains."
-    fi
+    validate_mint_boot_labels "$temp/grub.cfg" "$temp/isolinux-live.cfg" ||
+        die "Linux Mint boot-menu labels were not preserved."
     for boot_config in "$temp/grub.cfg" "$temp/isolinux-live.cfg"; do
         grep -Fq 'boot=casper' "$boot_config" || die "Casper boot argument is missing."
         grep -Fq 'username=mint' "$boot_config" || die "Compatible live username is missing."
@@ -1745,12 +1742,9 @@ cmd_verify() {
         grep -Fq 'uuid=' "$boot_config" || die "Base-image UUID boot argument is missing."
     done
     initrd_listing=$(lsinitramfs "$temp/initrd.lz") || die "Unable to inspect the live initramfs."
-    grep -Fq 'napos-logo' <<<"$initrd_listing" ||
-        die "Live initramfs does not contain the NapOS Plymouth theme."
-    if grep -Fq 'mint-logo' <<<"$initrd_listing"; then
-        die "Live initramfs still contains the Mint Plymouth theme."
-    fi
-    ok "BIOS and UEFI menu labels and live Plymouth branding are valid."
+    grep -Fq 'mint-logo' <<<"$initrd_listing" ||
+        die "Live initramfs does not contain the Linux Mint Plymouth theme."
+    ok "Linux Mint boot menus, ISO identity, and live Plymouth theme are valid."
     [[ -s "$temp/filesystem.manifest-remove" ]] || die "filesystem.manifest-remove is missing or empty."
     squashfs_report=$(unsquashfs -s "$temp/filesystem.squashfs" 2>&1) || die "SquashFS superblock validation failed."
     compression=$(awk '$1 == "Compression" {print tolower($2); exit}' <<<"$squashfs_report")
@@ -1766,34 +1760,34 @@ cmd_verify() {
     base_iso="$DOWNLOAD_DIR/$BASE_ISO_NAME"
     if [[ -f "$base_iso" ]]; then
         xorriso -osirrox on -indev "$base_iso" \
-            -extract /casper/filesystem.manifest-remove "$temp/base-filesystem.manifest-remove" >/dev/null 2>&1
+            -extract /casper/filesystem.manifest-remove "$temp/base-filesystem.manifest-remove" \
+            -extract /boot/grub/grub.cfg "$temp/base-grub.cfg" \
+            -extract /isolinux/live.cfg "$temp/base-isolinux-live.cfg" >/dev/null 2>&1
         cmp -s "$temp/filesystem.manifest-remove" "$temp/base-filesystem.manifest-remove" ||
             die "filesystem.manifest-remove differs from the authenticated Mint input."
+        cmp -s "$temp/grub.cfg" "$temp/base-grub.cfg" ||
+            die "UEFI/GRUB configuration differs from the authenticated Mint input."
+        cmp -s "$temp/isolinux-live.cfg" "$temp/base-isolinux-live.cfg" ||
+            die "BIOS/ISOLINUX configuration differs from the authenticated Mint input."
     fi
-    napos_release=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null) || die "/etc/napos-release is missing."
     os_release=$(unsquashfs -cat "$temp/filesystem.squashfs" usr/lib/os-release 2>/dev/null) || die "/usr/lib/os-release is missing."
+    linuxmint_info=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/linuxmint/info 2>/dev/null) ||
+        die "/etc/linuxmint/info is missing."
+    issue=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/issue 2>/dev/null) || die "/etc/issue is missing."
+    issue_net=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/issue.net 2>/dev/null) || die "/etc/issue.net is missing."
     timezone=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/timezone 2>/dev/null) || die "/etc/timezone is missing."
     locale_data=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/default/locale 2>/dev/null) || die "/etc/default/locale is missing."
-    dconf_data=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local.d/00-napos 2>/dev/null) || die "NapOS dconf source is missing."
-    unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local >/dev/null 2>&1 || die "Compiled NapOS dconf database is missing."
-    grub_defaults=$(unsquashfs -cat "$temp/filesystem.squashfs" \
-        etc/default/grub.d/99-napos-branding.cfg 2>/dev/null) ||
-        die "Installed-GRUB NapOS override is missing."
-    grep -Fqx 'GRUB_VISIBLE_DISTRIBUTOR="NapOS"' <<<"$grub_defaults" ||
-        die "Installed GRUB distributor is not visibly branded NapOS."
-    grep -Fqx 'GRUB_DISTRIBUTOR="Ubuntu"' <<<"$grub_defaults" ||
-        die "Installed GRUB does not preserve the compatible Ubuntu EFI ID."
-    for grub_generator_path in \
-        etc/grub.d/10_linux \
-        etc/grub.d/10_linux_zfs \
-        etc/grub.d/20_linux_xen; do
-        unsquashfs -cat "$temp/filesystem.squashfs" "$grub_generator_path" 2>/dev/null |
-            grep -Fq "VISIBLE_GRUB_DISTRIBUTOR=\${GRUB_VISIBLE_DISTRIBUTOR:-\${GRUB_DISTRIBUTOR:-}}" ||
-            die "Installed GRUB generator does not separate its visible title: $grub_generator_path"
-        unsquashfs -cat "$temp/filesystem.squashfs" "$grub_generator_path" 2>/dev/null |
-            grep -Fqx '. /etc/default/grub.d/99-napos-branding.cfg' ||
-            die "Installed GRUB generator does not load the NapOS override: $grub_generator_path"
-    done
+    dconf_data=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local.d/00-desktop-defaults 2>/dev/null) ||
+        die "Desktop dconf source is missing."
+    mint_artwork_defaults=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/glib-2.0/schemas/mint-artwork.gschema.override 2>/dev/null) ||
+        die "Linux Mint artwork defaults are missing."
+    unsquashfs -cat "$temp/filesystem.squashfs" etc/dconf/db/local >/dev/null 2>&1 ||
+        die "Compiled desktop dconf database is missing."
+    if unsquashfs -ll "$temp/filesystem.squashfs" etc/default/grub.d 2>/dev/null |
+        grep -Eq '/99-.*branding[^/]*$'; then
+        die "A custom installed-GRUB branding override is present."
+    fi
     unsquashfs -cat "$temp/filesystem.squashfs" etc/default/grub.d/50_linuxmint.cfg 2>/dev/null |
         grep -Fqx 'GRUB_DISTRIBUTOR="Ubuntu"' ||
         die "Mint's compatible Ubuntu EFI distributor path was not preserved."
@@ -1803,18 +1797,14 @@ cmd_verify() {
     plymouth_text_alternative=$(unsquashfs -cat "$temp/filesystem.squashfs" \
         var/lib/dpkg/alternatives/text.plymouth 2>/dev/null) ||
         die "Plymouth text alternative metadata is missing."
-    grep -Fq '/usr/share/plymouth/themes/napos-logo/napos-logo.plymouth' \
-        <<<"$plymouth_default_alternative" || die "NapOS graphical Plymouth alternative is absent."
-    grep -Fq '/usr/share/plymouth/themes/napos-text/napos-text.plymouth' \
-        <<<"$plymouth_text_alternative" || die "NapOS text Plymouth alternative is absent."
-    grep -Fqx '300' <<<"$plymouth_default_alternative" ||
-        die "NapOS graphical Plymouth alternative does not use priority 300."
-    grep -Fqx '300' <<<"$plymouth_text_alternative" ||
-        die "NapOS text Plymouth alternative does not use priority 300."
+    grep -Fq '/usr/share/plymouth/themes/mint-logo/mint-logo.plymouth' \
+        <<<"$plymouth_default_alternative" || die "Linux Mint graphical Plymouth alternative is absent."
+    grep -Fq '/usr/share/plymouth/themes/mint-text/mint-text.plymouth' \
+        <<<"$plymouth_text_alternative" || die "Linux Mint text Plymouth alternative is absent."
     unsquashfs -ll "$temp/filesystem.squashfs" etc/alternatives/default.plymouth 2>/dev/null |
-        grep -Fq 'napos-logo/napos-logo.plymouth' || die "NapOS graphical Plymouth theme is not selected."
+        grep -Fq 'mint-logo/mint-logo.plymouth' || die "Linux Mint graphical Plymouth theme is not selected."
     unsquashfs -ll "$temp/filesystem.squashfs" etc/alternatives/text.plymouth 2>/dev/null |
-        grep -Fq 'napos-text/napos-text.plymouth' || die "NapOS text Plymouth theme is not selected."
+        grep -Fq 'mint-text/mint-text.plymouth' || die "Linux Mint text Plymouth theme is not selected."
     installer=$(read_installer_launcher "$temp/filesystem.squashfs") ||
         die "No supported installer launcher exists in the SquashFS."
     chrome_source_file="$temp/google-chrome.sources"
@@ -1884,8 +1874,8 @@ cmd_verify() {
     unsquashfs -cat "$temp/filesystem.squashfs" \
         usr/share/applications/org.fcitx.fcitx5-config-qt.desktop >/dev/null 2>&1 ||
         die "Fcitx5 Configuration menu entry is missing."
-    unsquashfs -ll "$temp/filesystem.squashfs" usr/libexec/napos-fcitx5-lotus-user 2>/dev/null |
-        grep -q 'usr/libexec/napos-fcitx5-lotus-user' || die "Fcitx5 Lotus user resolver is missing."
+    unsquashfs -ll "$temp/filesystem.squashfs" usr/libexec/fcitx5-lotus-user-resolver 2>/dev/null |
+        grep -q 'usr/libexec/fcitx5-lotus-user-resolver' || die "Fcitx5 Lotus user resolver is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/fcitx5/addon/lotus.conf 2>/dev/null |
         grep -qx 'Library=liblotus' || die "Fcitx5 Lotus addon descriptor is missing."
     unsquashfs -cat "$temp/filesystem.squashfs" usr/share/fcitx5/inputmethod/lotus.conf 2>/dev/null |
@@ -1899,10 +1889,10 @@ cmd_verify() {
     fcitx_config=$(unsquashfs -cat "$temp/filesystem.squashfs" etc/skel/.config/fcitx5/config 2>/dev/null) ||
         die "Fcitx5 default behavior is missing."
     lotus_user_unit=$(unsquashfs -cat "$temp/filesystem.squashfs" \
-        etc/systemd/system/user@.service.d/50-napos-fcitx5-lotus.conf 2>/dev/null) ||
+        etc/systemd/system/user@.service.d/50-fcitx5-lotus.conf 2>/dev/null) ||
         die "Fcitx5 Lotus user service dependency is missing."
     lotus_server_unit=$(unsquashfs -cat "$temp/filesystem.squashfs" \
-        etc/systemd/system/fcitx5-lotus-server@.service.d/10-napos-user-resolution.conf 2>/dev/null) ||
+        etc/systemd/system/fcitx5-lotus-server@.service.d/10-user-resolution.conf 2>/dev/null) ||
         die "Fcitx5 Lotus server override is missing."
     for setting in \
         'XMODIFIERS=@im=fcitx' \
@@ -1920,9 +1910,9 @@ cmd_verify() {
     grep -qx 'ActiveByDefault=False' <<<"$fcitx_config" || die "Fcitx5 does not start in English mode."
     grep -Fqx 'Wants=fcitx5-lotus-server@%i.service' <<<"$lotus_user_unit" ||
         die "Lotus is not coupled to systemd user startup."
-    grep -Fqx 'ExecCondition=/usr/libexec/napos-fcitx5-lotus-user --check %i' <<<"$lotus_server_unit" ||
+    grep -Fqx 'ExecCondition=/usr/libexec/fcitx5-lotus-user-resolver --check %i' <<<"$lotus_server_unit" ||
         die "Lotus user eligibility checking is missing."
-    grep -Fqx 'ExecStart=/usr/libexec/napos-fcitx5-lotus-user --exec %i' <<<"$lotus_server_unit" ||
+    grep -Fqx 'ExecStart=/usr/libexec/fcitx5-lotus-user-resolver --exec %i' <<<"$lotus_server_unit" ||
         die "Lotus UID-to-username resolution is missing."
     if unsquashfs -cat "$temp/filesystem.squashfs" \
         etc/systemd/system/multi-user.target.wants/fcitx5-lotus-server@root.service >/dev/null 2>&1; then
@@ -1955,7 +1945,7 @@ cmd_verify() {
         usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json 2>/dev/null) ||
         die "Cinnamon menu defaults are missing."
     validate_cinnamon_menu_icon_defaults "$menu_settings" ||
-        die "Cinnamon menu does not default to the NapOS icon."
+        die "Cinnamon menu does not preserve the Linux Mint icon."
     validate_cinnamon_launcher_defaults "$grouped_window_list" "$panel_launchers" ||
         die "Cinnamon taskbar launcher defaults are incomplete or incorrectly ordered."
     for desktop_launcher in \
@@ -2042,16 +2032,32 @@ cmd_verify() {
             die "Celluloid remains assigned as a MIME handler."
         fi
     done
-    grep -qx 'NAPOS_NAME="NapOS"' <<<"$napos_release" || die "Embedded NapOS identity is incorrect."
-    grep -qx "NAPOS_VERSION=\"$NAPOS_VERSION\"" <<<"$napos_release" || die "Embedded NapOS version is incorrect."
-    grep -qx 'NAME="NapOS"' <<<"$os_release" || die "os-release NAME is incorrect."
-    grep -qx "PRETTY_NAME=\"NapOS $NAPOS_VERSION\"" <<<"$os_release" || die "os-release PRETTY_NAME is incorrect."
+    grep -qx 'NAME="Linux Mint"' <<<"$os_release" || die "Linux Mint os-release NAME was not preserved."
+    grep -qx "PRETTY_NAME=\"Linux Mint $BASE_VERSION\"" <<<"$os_release" ||
+        die "Linux Mint os-release PRETTY_NAME was not preserved."
+    grep -qx "VERSION=\"$BASE_VERSION ($base_codename_title)\"" <<<"$os_release" ||
+        die "Linux Mint os-release VERSION was not preserved."
     grep -qx 'ID=linuxmint' <<<"$os_release" || die "Mint technical ID was not preserved."
     grep -qx "VERSION_CODENAME=$BASE_CODENAME" <<<"$os_release" || die "Mint codename was not preserved."
     grep -qx "UBUNTU_CODENAME=$UBUNTU_CODENAME" <<<"$os_release" || die "Ubuntu codename was not preserved."
+    grep -qx "DESCRIPTION=\"Linux Mint $BASE_VERSION $base_codename_title\"" <<<"$linuxmint_info" ||
+        die "Linux Mint edition metadata was not preserved."
+    grep -qx "GRUB_TITLE=Linux Mint $BASE_VERSION Cinnamon" <<<"$linuxmint_info" ||
+        die "Linux Mint installed-GRUB title was not preserved."
+    [[ "$issue" == "Linux Mint $BASE_VERSION $base_codename_title \\n \\l" ]] ||
+        die "Linux Mint local issue banner was not preserved."
+    [[ "$issue_net" == "Linux Mint $BASE_VERSION $base_codename_title" ]] ||
+        die "Linux Mint network issue banner was not preserved."
     [[ "$timezone" == "$DEFAULT_TIMEZONE" ]] || die "Unexpected timezone: $timezone"
     grep -qx 'LANG=en_US.UTF-8' <<<"$locale_data" || die "Default locale is not en_US.UTF-8."
-    grep -q 'napos-wallpaper.svg' <<<"$dconf_data" || die "NapOS wallpaper dconf default is missing."
+    if grep -Eq '^picture-uri=' <<<"$dconf_data"; then
+        die "Custom desktop defaults override the Linux Mint wallpaper."
+    fi
+    grep -Fqx "picture-uri='file:///usr/share/backgrounds/linuxmint/default_background.jpg'" \
+        <<<"$mint_artwork_defaults" || die "Linux Mint wallpaper default was not preserved."
+    unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/backgrounds/linuxmint/default_background.jpg >/dev/null 2>&1 ||
+        die "Linux Mint default wallpaper is missing."
     validate_cinnamon_panel_defaults "$dconf_data" ||
         die "Cinnamon panel defaults are incomplete or incorrectly positioned."
     validate_cinnamon_desktop_defaults "$dconf_data" ||
@@ -2060,11 +2066,15 @@ cmd_verify() {
         die "Cinnamon CopyQ shortcut defaults are incomplete or incorrect."
     validate_cinnamon_theme_defaults "$dconf_data" ||
         die "Cinnamon theme, pointer, or dark-mode defaults are missing or invalid."
-    grep -q '^Name=Install NapOS$' <<<"$installer" || die "Installer launcher is not branded Install NapOS."
-    grep -q '^Name\[vi\]=Cài đặt NapOS$' <<<"$installer" || die "Vietnamese installer label is not branded Cài đặt NapOS."
-    grep -q '^Icon=napos-logo$' <<<"$installer" || die "Installer launcher icon is not NapOS."
-    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/backgrounds/napos/napos-wallpaper.svg >/dev/null 2>&1 || die "NapOS wallpaper is missing."
-    unsquashfs -cat "$temp/filesystem.squashfs" usr/share/icons/hicolor/scalable/apps/napos-logo.svg >/dev/null 2>&1 || die "NapOS logo is missing."
+    grep -q '^Name=Install RELEASE$' <<<"$installer" ||
+        die "Linux Mint installer launcher name was not preserved."
+    grep -q '^Name\[vi\]=Cài đặt RELEASE$' <<<"$installer" ||
+        die "Linux Mint Vietnamese installer label was not preserved."
+    grep -q '^Icon=mintubiquity$' <<<"$installer" ||
+        die "Linux Mint installer icon was not preserved."
+    if unsquashfs -ll "$temp/filesystem.squashfs" 2>/dev/null | grep -Fi 'vnmint'; then
+        die "The guest filesystem contains build-project identity paths."
+    fi
     unsquashfs -cat "$temp/filesystem.squashfs" \
         usr/share/fonts/truetype/msttcorefonts/Arial.ttf >/dev/null 2>&1 ||
         die "Microsoft Arial font payload is missing."
@@ -2120,14 +2130,14 @@ cmd_verify() {
         "$temp/filesystem.manifest-remove"; then
         die "Microsoft core fonts installer is listed for removal by the live installer."
     fi
-    if grep -q 'Napos' <<<"$napos_release$os_release$installer"; then
-        die 'Incorrect product capitalization "Napos" found in the ISO.'
-    fi
-
     build_info="${iso%.iso}.build-info.json"
     if [[ -f "$build_info" ]]; then
-        [[ "$(jq -r .build_id "$build_info")" == "$(sed -n 's/^NAPOS_BUILD_ID="\(.*\)"$/\1/p' <<<"$napos_release")" ]] ||
-            die "Adjacent and embedded build IDs differ."
+        [[ "$(jq -r .product "$build_info")" == vnmint ]] ||
+            die "Adjacent provenance has an unexpected product name."
+        [[ "$(jq -r .version "$build_info")" == "$VNMINT_VERSION" ]] ||
+            die "Adjacent provenance has an unexpected remix version."
+        [[ "$(jq -r .build_id "$build_info")" =~ ^[a-f0-9]{16}$ ]] ||
+            die "Adjacent provenance has an invalid build ID."
         [[ "$(jq -r .compression "$build_info")" == "$compression" ]] ||
             die "Adjacent provenance and SquashFS compression differ."
         [[ "$(jq -r .source.manifest_remove_sha256 "$build_info")" == "$(sha256_of "$temp/filesystem.manifest-remove")" ]] ||
@@ -2208,7 +2218,7 @@ cmd_verify() {
             "$WINDOWS_10_DARK_THEME_LICENSE" ]] ||
             die "Adjacent provenance has an unexpected Windows 10 Dark theme license."
     fi
-    ok "NapOS identity, packages, locale, timezone, artwork, and installer metadata are valid."
+    ok "Linux Mint identity and branding, packages, locale, timezone, and installer metadata are valid."
     ok "Verified ISO: $iso"
 }
 
@@ -2224,8 +2234,8 @@ cmd_inspect() {
     extract_verification_files "$iso" "$temp"
     printf '\nSquashFS:\n'
     unsquashfs -s "$temp/filesystem.squashfs"
-    printf '\nNapOS release:\n'
-    unsquashfs -cat "$temp/filesystem.squashfs" etc/napos-release 2>/dev/null
+    printf '\nLinux Mint release:\n'
+    unsquashfs -cat "$temp/filesystem.squashfs" usr/lib/os-release 2>/dev/null
     printf '\nSelected packages:\n'
     for package in vlc flameshot copyq ttf-mscorefonts-installer \
         gtk2-engines-murrine gtk2-engines-pixbuf \
@@ -2253,7 +2263,7 @@ cmd_build() {
     cmd_doctor
     mkdir -p "$WORK_DIR" "$DIST_DIR"
     exec 9>"$WORK_DIR/.build.lock"
-    flock -n 9 || die "Another NapOS build holds $WORK_DIR/.build.lock"
+    flock -n 9 || die "Another vnmint build holds $WORK_DIR/.build.lock"
 
     BUILD_PROFILE=$profile
     BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -2267,7 +2277,7 @@ cmd_build() {
     log_disk_usage "authenticated input fetch"
     BUILD_ID=$(build_id)
     export BUILD_PROFILE BUILD_ID BUILD_TIMESTAMP
-    log "Starting NapOS $NAPOS_VERSION $profile build (build ID $BUILD_ID)"
+    log "Starting vnmint $VNMINT_VERSION $profile build (build ID $BUILD_ID)"
     if check_github_actions_ubuntu; then
         prepare_github_work_tree
     else
@@ -2298,7 +2308,7 @@ cmd_build() {
 cmd_clean_work() {
     mkdir -p "$WORK_DIR"
     exec 9>"$WORK_DIR/.build.lock"
-    flock -n 9 || die "Refusing cleanup while another NapOS build is active."
+    flock -n 9 || die "Refusing cleanup while another vnmint build is active."
     need_sudo
     cleanup_mounts "$ROOTFS"
     for path in "$ISO_TREE" "$ROOTFS" "$META_DIR"; do
@@ -2310,9 +2320,9 @@ cmd_clean_work() {
 cmd_clean_cache() {
     mkdir -p "$CACHE_DIR" "$WORK_DIR"
     exec 9>"$WORK_DIR/.build.lock"
-    flock -n 9 || die "Refusing cache cleanup while a NapOS build is active."
+    flock -n 9 || die "Refusing cache cleanup while a vnmint build is active."
     exec 8>"$CACHE_DIR/.fetch.lock"
-    flock -n 8 || die "Refusing cache cleanup while a NapOS fetch or build is active."
+    flock -n 8 || die "Refusing cache cleanup while a vnmint fetch or build is active."
     need_sudo
     cleanup_mounts "$ROOTFS"
     require_clean_mount_state "$CACHE_DIR"

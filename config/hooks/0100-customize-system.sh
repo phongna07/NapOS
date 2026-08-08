@@ -3,7 +3,7 @@
 
 set -Eeuo pipefail
 
-required=(NAPOS_NAME NAPOS_ID NAPOS_VERSION NAPOS_EDITION BASE_VERSION BASE_CODENAME UBUNTU_CODENAME DEFAULT_LOCALE DEFAULT_TIMEZONE BUILD_PROFILE BUILD_ID BUILD_TIMESTAMP)
+required=(UBUNTU_CODENAME DEFAULT_LOCALE DEFAULT_TIMEZONE)
 for variable in "${required[@]}"; do
     [[ -n "${!variable:-}" ]] || {
         printf 'Missing hook environment variable: %s\n' "$variable" >&2
@@ -11,16 +11,11 @@ for variable in "${required[@]}"; do
     }
 done
 
-[[ "$NAPOS_NAME" == "NapOS" ]] || {
-    printf 'Product display name must be exactly NapOS.\n' >&2
-    exit 1
-}
-
-printf '[NapOS] Configuring installer defaults...\n'
+printf '[vnmint] Configuring installer defaults...\n'
 printf '%s\n' 'ubiquity ubiquity/use_nonfree boolean true' |
     debconf-set-selections
 
-printf '[NapOS] Configuring locale and timezone...\n'
+printf '[vnmint] Configuring locale and timezone...\n'
 if grep -q '^# en_US.UTF-8 UTF-8' /etc/locale.gen; then
     sed -i 's/^# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
 fi
@@ -32,44 +27,13 @@ EOF
 ln -snf "/usr/share/zoneinfo/$DEFAULT_TIMEZONE" /etc/localtime
 printf '%s\n' "$DEFAULT_TIMEZONE" >/etc/timezone
 
-printf '[NapOS] Writing conservative operating-system identity...\n'
-cat >/usr/lib/os-release <<EOF
-NAME="NapOS"
-PRETTY_NAME="NapOS $NAPOS_VERSION"
-ID=linuxmint
-ID_LIKE="ubuntu debian"
-VERSION_ID="$BASE_VERSION"
-VERSION="$NAPOS_VERSION (based on Linux Mint $BASE_VERSION)"
-VERSION_CODENAME=$BASE_CODENAME
-UBUNTU_CODENAME=$UBUNTU_CODENAME
-VARIANT="NapOS"
-VARIANT_ID=$NAPOS_ID
-EOF
-ln -snf ../usr/lib/os-release /etc/os-release
-
-cat >/etc/napos-release <<EOF
-NAPOS_NAME="NapOS"
-NAPOS_ID="$NAPOS_ID"
-NAPOS_VERSION="$NAPOS_VERSION"
-NAPOS_EDITION="$NAPOS_EDITION"
-NAPOS_BUILD_PROFILE="$BUILD_PROFILE"
-NAPOS_BUILD_ID="$BUILD_ID"
-NAPOS_BUILD_TIMESTAMP="$BUILD_TIMESTAMP"
-NAPOS_BASE_NAME="Linux Mint"
-NAPOS_BASE_VERSION="$BASE_VERSION"
-NAPOS_BASE_CODENAME="$BASE_CODENAME"
-NAPOS_UBUNTU_CODENAME="$UBUNTU_CODENAME"
-EOF
-printf 'NapOS %s \\n \\l\n' "$NAPOS_VERSION" >/etc/issue
-printf 'NapOS %s\n' "$NAPOS_VERSION" >/etc/issue.net
-
-printf '[NapOS] Installing Cinnamon desktop defaults...\n'
+printf '[vnmint] Installing Cinnamon desktop defaults...\n'
 mkdir -p /etc/dconf/profile /etc/dconf/db/local.d
 cat >/etc/dconf/profile/user <<'EOF'
 user-db:user
 system-db:local
 EOF
-cat >/etc/dconf/db/local.d/00-napos <<'EOF'
+cat >/etc/dconf/db/local.d/00-desktop-defaults <<'EOF'
 [org/cinnamon]
 enabled-applets=['panel1:center:0:menu@cinnamon.org', 'panel1:left:1:separator@cinnamon.org', 'panel1:center:1:grouped-window-list@cinnamon.org', 'panel1:right:0:systray@cinnamon.org', 'panel1:right:1:xapp-status@cinnamon.org', 'panel1:right:2:notifications@cinnamon.org', 'panel1:right:3:printers@cinnamon.org', 'panel1:right:4:removable-drives@cinnamon.org', 'panel1:right:5:keyboard@cinnamon.org', 'panel1:right:6:favorites@cinnamon.org', 'panel1:right:7:network@cinnamon.org', 'panel1:right:8:sound@cinnamon.org', 'panel1:right:9:power@cinnamon.org', 'panel1:right:10:calendar@cinnamon.org', 'panel1:right:11:cornerbar@cinnamon.org']
 
@@ -94,17 +58,10 @@ name='CopyQ Clipboard History'
 binding=['<Super>v']
 command='copyq toggle'
 
-[org/cinnamon/desktop/background]
-picture-uri='file:///usr/share/backgrounds/napos/napos-wallpaper.svg'
-picture-options='zoom'
-
-[org/gnome/desktop/background]
-picture-uri='file:///usr/share/backgrounds/napos/napos-wallpaper.svg'
-picture-options='zoom'
 EOF
 dconf update
 
-printf '[NapOS] Configuring CopyQ clipboard history...\n'
+printf '[vnmint] Configuring CopyQ clipboard history...\n'
 copyq_desktop=/usr/share/applications/com.github.hluk.copyq.desktop
 [[ -f "$copyq_desktop" ]] || {
     printf 'Required CopyQ desktop launcher is missing: %s\n' "$copyq_desktop" >&2
@@ -119,7 +76,7 @@ grep -qx 'Exec=copyq' /etc/xdg/autostart/com.github.hluk.copyq.desktop || {
 }
 chmod 0644 /etc/xdg/autostart/com.github.hluk.copyq.desktop
 
-printf '[NapOS] Configuring Flameshot screenshot tool...\n'
+printf '[vnmint] Configuring Flameshot screenshot tool...\n'
 flameshot_desktop=/usr/share/applications/org.flameshot.Flameshot.desktop
 [[ -f "$flameshot_desktop" ]] || {
     printf 'Required Flameshot desktop launcher is missing: %s\n' "$flameshot_desktop" >&2
@@ -135,8 +92,8 @@ grep -qx 'Exec=flameshot' /etc/xdg/autostart/org.flameshot.Flameshot.desktop || 
 }
 chmod 0644 /etc/xdg/autostart/org.flameshot.Flameshot.desktop
 
-printf '[NapOS] Configuring Fcitx5 Lotus defaults...\n'
-chmod 0755 /usr/libexec/napos-fcitx5-lotus-user
+printf '[vnmint] Configuring Fcitx5 Lotus defaults...\n'
+chmod 0755 /usr/libexec/fcitx5-lotus-user-resolver
 for variable in XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE; do
     sed -i "/^${variable}=/d" /etc/environment
 done
@@ -173,7 +130,7 @@ EOF
 rm -f /etc/systemd/system/multi-user.target.wants/fcitx5-lotus-server@root.service
 systemd-sysusers
 
-printf '[NapOS] Configuring default applications...\n'
+printf '[vnmint] Configuring default applications...\n'
 celluloid_desktop=io.github.celluloid_player.Celluloid.desktop
 vlc_desktop=vlc.desktop
 onlyoffice_desktop=onlyoffice-desktopeditors.desktop
@@ -326,51 +283,6 @@ PY
     rm -f -- "$temporary"
 }
 
-set_cinnamon_menu_icon_default() {
-    local settings_override=$1
-    local icon_path=$2
-    local temporary
-    [[ -f "$settings_override" ]] || {
-        printf 'Required Cinnamon menu override is missing: %s\n' "$settings_override" >&2
-        return 1
-    }
-    [[ -f "$icon_path" ]] || {
-        printf 'Required Cinnamon menu icon is missing: %s\n' "$icon_path" >&2
-        return 1
-    }
-    temporary=$(mktemp)
-    if ! python3 - "$settings_override" "$icon_path" >"$temporary" <<'PY'
-import json
-import sys
-
-settings_path = sys.argv[1]
-icon_path = sys.argv[2]
-
-with open(settings_path, encoding="utf-8") as settings_file:
-    settings = json.load(settings_file)
-
-for setting_name in ("menu-custom", "menu-icon"):
-    if setting_name not in settings or not isinstance(settings[setting_name], dict):
-        raise SystemExit(f"Cinnamon menu setting is missing: {setting_name}")
-
-settings["menu-custom"]["default"] = True
-settings["menu-icon"]["default"] = icon_path
-settings["menu-icon"]["default_icon"] = icon_path
-json.dump(settings, sys.stdout, indent=4, ensure_ascii=False)
-sys.stdout.write("\n")
-PY
-    then
-        rm -f -- "$temporary"
-        return 1
-    fi
-    cat "$temporary" >"$settings_override"
-    rm -f -- "$temporary"
-}
-
-menu_icon=/usr/share/icons/hicolor/scalable/apps/napos-logo.svg
-menu_settings_override=/usr/share/cinnamon/applets/menu@cinnamon.org/settings-override.json
-set_cinnamon_menu_icon_default "$menu_settings_override" "$menu_icon"
-
 taskbar_launchers=(
     nemo.desktop
     google-chrome.desktop
@@ -424,86 +336,13 @@ for installer_shortcut in ubiquity.desktop live-installer.desktop calamares.desk
     rm -f -- "/etc/skel/Desktop/$installer_shortcut"
 done
 
-printf '[NapOS] Branding the installer launcher...\n'
-installer_found=0
-for desktop in \
-    /usr/share/applications/ubiquity.desktop \
-    /usr/share/applications/live-installer.desktop \
-    /usr/share/applications/calamares.desktop; do
-    [[ -f "$desktop" ]] || continue
-    installer_found=1
-    temporary=$(mktemp)
-    awk '
-        /^Name(\[[^]]+\])?=/ { next }
-        /^Icon=/ { next }
-        { print }
-        END {
-            print "Name=Install NapOS"
-            print "Name[vi]=Cài đặt NapOS"
-            print "Icon=napos-logo"
-        }
-    ' "$desktop" >"$temporary"
-    cat "$temporary" >"$desktop"
-    rm -f "$temporary"
-done
-(( installer_found == 1 )) || {
-    printf 'No supported Mint installer desktop launcher was found.\n' >&2
-    exit 1
-}
-
-printf '[NapOS] Branding installed GRUB while preserving its Ubuntu EFI ID...\n'
-for grub_generator in \
-    /etc/grub.d/10_linux \
-    /etc/grub.d/10_linux_zfs \
-    /etc/grub.d/20_linux_xen; do
-    [[ -f "$grub_generator" ]] || {
-        printf 'Required installed-GRUB generator is missing: %s\n' "$grub_generator" >&2
-        exit 1
-    }
-    if ! grep -Fq 'VISIBLE_GRUB_DISTRIBUTOR=' "$grub_generator"; then
-        sed -i 's/GRUB_DISTRIBUTOR/VISIBLE_GRUB_DISTRIBUTOR/g' "$grub_generator"
-        sed -i "/^\\. .*grub-mkconfig_lib/a\\. /etc/default/grub.d/99-napos-branding.cfg\nVISIBLE_GRUB_DISTRIBUTOR=\${GRUB_VISIBLE_DISTRIBUTOR:-\${GRUB_DISTRIBUTOR:-}}" \
-            "$grub_generator"
-    fi
-    grep -Fqx '. /etc/default/grub.d/99-napos-branding.cfg' "$grub_generator" || {
-        printf 'Failed to load the NapOS GRUB override in: %s\n' "$grub_generator" >&2
-        exit 1
-    }
-    grep -Fq "VISIBLE_GRUB_DISTRIBUTOR=\${GRUB_VISIBLE_DISTRIBUTOR:-\${GRUB_DISTRIBUTOR:-}}" \
-        "$grub_generator" || {
-        printf 'Failed to separate visible GRUB branding in: %s\n' "$grub_generator" >&2
-        exit 1
-    }
-done
-
-printf '[NapOS] Installing Plymouth boot themes...\n'
-spinner_theme=/usr/share/plymouth/themes/spinner
-napos_logo_theme=/usr/share/plymouth/themes/napos-logo
-napos_text_theme=/usr/share/plymouth/themes/napos-text
-[[ -d "$spinner_theme" && -s "$napos_logo_theme/napos-logo.png" ]] || {
-    printf 'Required Plymouth source assets are missing.\n' >&2
-    exit 1
-}
-cp -a "$spinner_theme"/*.png "$napos_logo_theme/"
-install -m 0644 "$napos_logo_theme/napos-logo.png" "$napos_logo_theme/watermark.png"
-update-alternatives --install \
-    /usr/share/plymouth/themes/default.plymouth default.plymouth \
-    "$napos_logo_theme/napos-logo.plymouth" 300
-update-alternatives --set default.plymouth "$napos_logo_theme/napos-logo.plymouth"
-update-alternatives --install \
-    /usr/share/plymouth/themes/text.plymouth text.plymouth \
-    "$napos_text_theme/napos-text.plymouth" 300
-update-alternatives --set text.plymouth "$napos_text_theme/napos-text.plymouth"
+printf '[vnmint] Rebuilding the initramfs with Linux Mint Plymouth defaults...\n'
 update-initramfs -u -k all
 initrd_listing=$(lsinitramfs /boot/initrd.img)
-grep -Fq 'napos-logo' <<<"$initrd_listing" || {
-    printf 'Rebuilt initramfs does not contain the NapOS Plymouth theme.\n' >&2
+grep -Fq 'mint-logo' <<<"$initrd_listing" || {
+    printf 'Rebuilt initramfs does not contain the Linux Mint Plymouth theme.\n' >&2
     exit 1
 }
-if grep -Fq 'mint-logo' <<<"$initrd_listing"; then
-    printf 'Rebuilt initramfs still contains the selected Mint Plymouth theme.\n' >&2
-    exit 1
-fi
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database /usr/share/applications || true
@@ -512,4 +351,4 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 fi
 
-printf '[NapOS] Branding complete.\n'
+printf '[vnmint] Customization complete.\n'

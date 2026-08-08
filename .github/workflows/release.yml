@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: napos-release
+  group: vnmint-release
   cancel-in-progress: false
 
 jobs:
@@ -34,8 +34,8 @@ jobs:
           source remix.conf
           source config/source.lock
           {
-            echo "version=$NAPOS_VERSION"
-            echo "artifact_base=NapOS-$NAPOS_VERSION-$NAPOS_EDITION-$NAPOS_ARCH"
+            echo "version=$VNMINT_VERSION"
+            echo "artifact_base=vnmint-$VNMINT_VERSION-$VNMINT_EDITION-$VNMINT_ARCH"
             echo "base_sha256=$BASE_ISO_SHA256"
             echo "mint_fingerprint=$MINT_SIGNING_FINGERPRINT"
           } >>"$GITHUB_OUTPUT"
@@ -61,7 +61,7 @@ jobs:
             cache/downloads/${{ steps.build-config.outputs.base_sha256 }}
             cache/gnupg
           key: >-
-            napos-mint-ubuntu-24.04-${{ steps.build-config.outputs.base_sha256 }}-${{ steps.build-config.outputs.mint_fingerprint }}
+            vnmint-mint-ubuntu-24.04-${{ steps.build-config.outputs.base_sha256 }}-${{ steps.build-config.outputs.mint_fingerprint }}
 
       - name: Build and verify release ISO
         run: make release
@@ -69,7 +69,7 @@ jobs:
       - name: Upload verified release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: NapOS-${{ steps.build-config.outputs.version }}-release-${{ github.run_number }}
+          name: vnmint-${{ steps.build-config.outputs.version }}-release-${{ github.run_number }}
           path: |
             dist/${{ steps.build-config.outputs.artifact_base }}.iso
             dist/${{ steps.build-config.outputs.artifact_base }}.iso.sha256

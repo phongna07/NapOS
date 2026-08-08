@@ -1,7 +1,6 @@
 - [x] github action
-- [ ] versioning and branching
-- [x] Change background
-- [x] Change logo
+- [x] Preserve the Linux Mint background
+- [x] Preserve the Linux Mint icons and visual identity
 - [x] Remove firefox
 - [x] Remove libreoffice
 - [x] remove celluloid media player
@@ -16,7 +15,8 @@
 - [x] edit the minimize, maximize, close buttons for each windows (Windows-10-Dark set the Applications option in Themes)
 - [x] mouse pointer "Yaru"
 - [x] dark theme
-- [ ] fastfetch
+- [x] fastfetch
 - [x] set "Install multimedia codecs" as the default
-- [x] Change GRUB boot name (currently Linux Mint)
+- [x] Preserve Linux Mint in GRUB, ISOLINUX, Plymouth, and OS metadata
+- [ ] versioning and branching and ISO file hosting
 - [ ] OTA update
