@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+
+set -Eeuo pipefail
+
+kernel_cmdline=$(< /proc/cmdline)
+case " $kernel_cmdline " in
+    *" boot=casper "* | *" boot=live "*) ;;
+    *) exit 0 ;;
+esac
+
+cache_dir=${XDG_CACHE_HOME:-"$HOME/.cache"}
+launch_marker="$cache_dir/live-installer-autostarted"
+mkdir -p -- "$cache_dir"
+
+if ! mkdir -- "$launch_marker" 2>/dev/null; then
+    exit 0
+fi
+
+if gtk-launch ubiquity.desktop; then
+    exit 0
+fi
+
+rmdir -- "$launch_marker"
+exit 1

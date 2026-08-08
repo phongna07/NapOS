@@ -18,6 +18,9 @@ nhận diện của Linux Mint 22.3 Cinnamon.
 - **Giao diện làm việc thuận tiện.** Thanh tác vụ được căn giữa, giao diện ứng
   dụng Windows 10 Dark, con trỏ Yaru và các biểu tượng desktop hữu ích được cấu
   hình sẵn, trong khi nhận diện Linux Mint vẫn được giữ nguyên.
+- **Cài đặt nhanh từ môi trường live.** Biểu tượng **Install Linux Mint** nằm ở
+  vị trí đầu tiên trên desktop và trình cài đặt tiêu chuẩn tự mở sau khi phiên
+  Cinnamon live khởi động. Có thể đóng trình cài đặt để tiếp tục dùng thử.
 - **Ứng dụng thiết yếu.** Google Chrome, ONLYOFFICE, VLC, Flameshot và CopyQ
   được cài đặt cùng các thiết lập mặc định phù hợp.
 - **Phông chữ quen thuộc.** Bộ phông chữ Microsoft thông dụng giúp tài liệu giữ
@@ -40,8 +43,10 @@ ONLYOFFICE, VLC handles common media formats, CopyQ is available with
 `Super+V`, and Vietnamese input is ready through Fcitx5 Lotus.
 
 Boot the image into the Linux Mint live environment to evaluate it before
-installing. When ready, launch **Install Linux Mint** and follow the standard
-installer.
+installing. **Install Linux Mint** occupies the top-left desktop slot, and the
+standard installer opens automatically after the live Cinnamon desktop starts.
+Close it to continue evaluating the live environment; the desktop shortcut
+remains available whenever you are ready to install.
 
 ## Download
 

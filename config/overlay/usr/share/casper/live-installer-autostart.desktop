@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Start Linux Mint Installer
+Comment=Start the Linux Mint installer in the live session
+Exec=/usr/libexec/live-installer-autostart
+Terminal=false
+NoDisplay=true
+OnlyShowIn=X-Cinnamon;
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5

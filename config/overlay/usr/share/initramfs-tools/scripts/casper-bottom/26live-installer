@@ -1,0 +1,55 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+
+PREREQ=""
+DESCRIPTION="Configuring the live installer..."
+
+prereqs()
+{
+    echo "$PREREQ"
+}
+
+case ${1:-} in
+prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+# shellcheck source=/dev/null
+. /scripts/casper-functions
+load_confmodule
+
+log_begin_msg "$DESCRIPTION"
+
+desktop_launcher="/home/$USERNAME/Desktop/ubiquity.desktop"
+autostart_source=/usr/share/casper/live-installer-autostart.desktop
+autostart_dir="/home/$USERNAME/.config/autostart"
+autostart_launcher="$autostart_dir/live-installer-autostart.desktop"
+
+if [ ! -f "/root$desktop_launcher" ]; then
+    printf '%s\n' "Live installer shortcut is missing: $desktop_launcher" >&2
+    log_end_msg
+    exit 0
+fi
+
+if chroot /root install -d -m 0755 -o "$USERNAME" -g "$USERNAME" "$autostart_dir" &&
+    chroot /root install -m 0644 -o "$USERNAME" -g "$USERNAME" \
+        "$autostart_source" "$autostart_launcher"; then
+    :
+else
+    printf '%s\n' "Unable to configure live installer autostart for $USERNAME." >&2
+fi
+
+# shellcheck disable=SC2016
+if chroot /root sudo -i -u "$USERNAME" dbus-run-session -- sh -c '
+    launcher=$1
+    gio set -t string "$launcher" metadata::nemo-icon-position "91,36" &&
+        gio set -t string "$launcher" metadata::monitor "0"
+' sh "$desktop_launcher"; then
+    :
+else
+    printf '%s\n' "Unable to place the live installer in the first desktop slot." >&2
+fi
+
+log_end_msg

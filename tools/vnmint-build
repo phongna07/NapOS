@@ -232,6 +232,42 @@ validate_desktop_shortcuts() {
     done
 }
 
+# The validator intentionally matches literal shell variables in image-side scripts.
+# shellcheck disable=SC2016
+validate_live_installer_defaults() {
+    local casper_script=$1
+    local autostart_entry=$2
+    local launcher_helper=$3
+
+    grep -Fq 'desktop_launcher="/home/$USERNAME/Desktop/ubiquity.desktop"' \
+        <<<"$casper_script" &&
+        grep -Fq 'autostart_source=/usr/share/casper/live-installer-autostart.desktop' \
+            <<<"$casper_script" &&
+        grep -Fq 'autostart_dir="/home/$USERNAME/.config/autostart"' \
+            <<<"$casper_script" &&
+        grep -Fq 'chroot /root sudo -i -u "$USERNAME" dbus-run-session -- sh -c' \
+            <<<"$casper_script" &&
+        grep -Fq 'gio set -t string "$launcher" metadata::nemo-icon-position "91,36"' \
+            <<<"$casper_script" &&
+        grep -Fq 'gio set -t string "$launcher" metadata::monitor "0"' \
+            <<<"$casper_script" &&
+        grep -Fqx 'Type=Application' <<<"$autostart_entry" &&
+        grep -Fqx 'Exec=/usr/libexec/live-installer-autostart' <<<"$autostart_entry" &&
+        grep -Fqx 'Terminal=false' <<<"$autostart_entry" &&
+        grep -Fqx 'NoDisplay=true' <<<"$autostart_entry" &&
+        grep -Fqx 'OnlyShowIn=X-Cinnamon;' <<<"$autostart_entry" &&
+        grep -Fqx 'X-GNOME-Autostart-enabled=true' <<<"$autostart_entry" &&
+        grep -Fqx 'X-GNOME-Autostart-Delay=5' <<<"$autostart_entry" &&
+        grep -Fq 'kernel_cmdline=$(< /proc/cmdline)' <<<"$launcher_helper" &&
+        grep -Fq '*" boot=casper "* | *" boot=live "*' <<<"$launcher_helper" &&
+        grep -Fq 'launch_marker="$cache_dir/live-installer-autostarted"' \
+            <<<"$launcher_helper" &&
+        grep -Fq 'if ! mkdir -- "$launch_marker" 2>/dev/null; then' \
+            <<<"$launcher_helper" &&
+        grep -Fq 'if gtk-launch ubiquity.desktop; then' <<<"$launcher_helper" &&
+        grep -Fq 'rmdir -- "$launch_marker"' <<<"$launcher_helper"
+}
+
 validate_cinnamon_copyq_defaults() {
     local dconf_data=$1
     awk '
@@ -1168,6 +1204,7 @@ validate_customized_rootfs() {
     local package chrome_key_fingerprint chrome_source dconf_data base_reference
     local lotus_key_fingerprint lotus_source apt_conffile apt_package apt_path
     local grouped_window_list panel_launchers menu_settings preserved_path
+    local live_installer_casper live_installer_autostart live_installer_helper
     local preserved_paths=(
         usr/lib/os-release
         etc/os-release
@@ -1398,6 +1435,20 @@ validate_customized_rootfs() {
     validate_desktop_shortcuts "$ROOTFS/etc/skel/Desktop" \
         "$ROOTFS/usr/share/applications" ||
         die "Default desktop shortcuts are missing, modified, non-executable, or include an installer."
+    [[ -x "$ROOTFS/usr/share/initramfs-tools/scripts/casper-bottom/26live-installer" ]] ||
+        die "Live installer Casper configuration is missing or not executable."
+    [[ -f "$ROOTFS/usr/share/casper/live-installer-autostart.desktop" ]] ||
+        die "Live installer autostart source is missing."
+    [[ -x "$ROOTFS/usr/libexec/live-installer-autostart" ]] ||
+        die "Live installer autostart helper is missing or not executable."
+    live_installer_casper=$(sudo cat \
+        "$ROOTFS/usr/share/initramfs-tools/scripts/casper-bottom/26live-installer")
+    live_installer_autostart=$(sudo cat \
+        "$ROOTFS/usr/share/casper/live-installer-autostart.desktop")
+    live_installer_helper=$(sudo cat "$ROOTFS/usr/libexec/live-installer-autostart")
+    validate_live_installer_defaults "$live_installer_casper" \
+        "$live_installer_autostart" "$live_installer_helper" ||
+        die "Live installer position or autostart configuration is invalid."
     base_reference=$(base_reference_root)
     for preserved_path in "${preserved_paths[@]}"; do
         sudo cmp -s "$ROOTFS/$preserved_path" "$base_reference/$preserved_path" ||
@@ -1702,6 +1753,8 @@ cmd_verify() {
     local copyq_autostart flameshot_autostart mimeapps mint_mimeapps grouped_window_list
     local panel_launchers menu_settings theme_index theme_file
     local application_defaults desktop_launcher desktop_listing installer_shortcut
+    local live_installer_casper live_installer_autostart live_installer_helper
+    local live_installer_listing
     local plymouth_default_alternative plymouth_text_alternative base_codename_title
     iso=$(resolve_iso_argument "${1:-}")
     base_codename_title=${BASE_CODENAME^}
@@ -1744,6 +1797,8 @@ cmd_verify() {
     initrd_listing=$(lsinitramfs "$temp/initrd.lz") || die "Unable to inspect the live initramfs."
     grep -Fq 'mint-logo' <<<"$initrd_listing" ||
         die "Live initramfs does not contain the Linux Mint Plymouth theme."
+    grep -Fq 'scripts/casper-bottom/26live-installer' <<<"$initrd_listing" ||
+        die "Live initramfs does not contain the installer session configuration."
     ok "Linux Mint boot menus, ISO identity, and live Plymouth theme are valid."
     [[ -s "$temp/filesystem.manifest-remove" ]] || die "filesystem.manifest-remove is missing or empty."
     squashfs_report=$(unsquashfs -s "$temp/filesystem.squashfs" 2>&1) || die "SquashFS superblock validation failed."
@@ -1948,6 +2003,32 @@ cmd_verify() {
         die "Cinnamon menu does not preserve the Linux Mint icon."
     validate_cinnamon_launcher_defaults "$grouped_window_list" "$panel_launchers" ||
         die "Cinnamon taskbar launcher defaults are incomplete or incorrectly ordered."
+    live_installer_casper=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/initramfs-tools/scripts/casper-bottom/26live-installer 2>/dev/null) ||
+        die "Live installer Casper configuration is missing."
+    live_installer_autostart=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/share/casper/live-installer-autostart.desktop 2>/dev/null) ||
+        die "Live installer autostart source is missing."
+    live_installer_helper=$(unsquashfs -cat "$temp/filesystem.squashfs" \
+        usr/libexec/live-installer-autostart 2>/dev/null) ||
+        die "Live installer autostart helper is missing."
+    validate_live_installer_defaults "$live_installer_casper" \
+        "$live_installer_autostart" "$live_installer_helper" ||
+        die "Live installer position or autostart configuration is invalid."
+    for live_installer_listing in \
+        usr/share/initramfs-tools/scripts/casper-bottom/26live-installer \
+        usr/libexec/live-installer-autostart; do
+        desktop_listing=$(unsquashfs -ll "$temp/filesystem.squashfs" \
+            "$live_installer_listing" 2>/dev/null) ||
+            die "Live installer executable metadata is missing: $live_installer_listing"
+        grep -Eq "^-rwxr-xr-x .*$live_installer_listing$" <<<"$desktop_listing" ||
+            die "Live installer file is not executable: $live_installer_listing"
+    done
+    desktop_listing=$(unsquashfs -ll "$temp/filesystem.squashfs" \
+        usr/share/casper/live-installer-autostart.desktop 2>/dev/null) ||
+        die "Live installer autostart metadata is missing."
+    grep -Eq '^-rw-r--r-- .*usr/share/casper/live-installer-autostart.desktop$' \
+        <<<"$desktop_listing" || die "Live installer autostart source has an invalid mode."
     for desktop_launcher in \
         google-chrome.desktop \
         onlyoffice-desktopeditors.desktop \

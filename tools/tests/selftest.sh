@@ -30,18 +30,28 @@ pass "Configuration validates the vnmint build settings"
 
 mapfile -t scripts < <(
     find "$PROJECT_ROOT/tools" "$PROJECT_ROOT/config/hooks" \
-        "$PROJECT_ROOT/config/overlay/usr/libexec" -type f \
+        "$PROJECT_ROOT/config/overlay/usr/libexec" \
+        "$PROJECT_ROOT/config/overlay/usr/share/initramfs-tools/scripts/casper-bottom" \
+        -type f \
         \( -name '*.sh' -o -path "$PROJECT_ROOT/tools/vnmint-build" \
-            -o -path "$PROJECT_ROOT/config/overlay/usr/libexec/fcitx5-lotus-user-resolver" \) | sort
+            -o -path "$PROJECT_ROOT/config/overlay/usr/libexec/fcitx5-lotus-user-resolver" \
+            -o -path "$PROJECT_ROOT/config/overlay/usr/libexec/live-installer-autostart" \
+            -o -path '*/casper-bottom/26live-installer' \) | sort
 )
 for script in "${scripts[@]}"; do
-    expect_success "Bash syntax: ${script#"$PROJECT_ROOT/"}" bash -n "$script"
+    syntax_shell="bash"
+    if [[ "$(head -n 1 "$script")" == '#!/bin/sh' ]]; then
+        syntax_shell="sh"
+    fi
+    expect_success "Shell syntax: ${script#"$PROJECT_ROOT/"}" "$syntax_shell" -n "$script"
 done
 
 if shellcheck -x "$PROJECT_ROOT/tools/vnmint-build" "$PROJECT_ROOT/tools/lib/common.sh" \
     "$PROJECT_ROOT/tools/tests/selftest.sh" "$PROJECT_ROOT/tools/ci/reclaim-github-disk.sh" \
     "$PROJECT_ROOT/config/hooks/0100-customize-system.sh" \
-    "$PROJECT_ROOT/config/overlay/usr/libexec/fcitx5-lotus-user-resolver"; then
+    "$PROJECT_ROOT/config/overlay/usr/libexec/fcitx5-lotus-user-resolver" \
+    "$PROJECT_ROOT/config/overlay/usr/libexec/live-installer-autostart" \
+    "$PROJECT_ROOT/config/overlay/usr/share/initramfs-tools/scripts/casper-bottom/26live-installer"; then
     pass "ShellCheck"
 else
     fail "ShellCheck"
@@ -964,6 +974,8 @@ eval "$(sed -n '/^validate_cinnamon_launcher_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_desktop_shortcuts()/,/^}/p' \
     "$PROJECT_ROOT/tools/vnmint-build")"
+eval "$(sed -n '/^validate_live_installer_defaults()/,/^}/p' \
+    "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_cinnamon_copyq_defaults()/,/^}/p' \
     "$PROJECT_ROOT/tools/vnmint-build")"
 eval "$(sed -n '/^validate_cinnamon_theme_defaults()/,/^}/p' \
@@ -1116,6 +1128,59 @@ expect_failure "Default desktop shortcuts exclude the live installer" \
 rm -f -- "$shortcut_desktop/ubiquity.desktop" "$shortcut_sources/mintinstall.desktop"
 expect_failure "Desktop shortcut installation rejects a missing application source" \
     install_desktop_shortcuts "$shortcut_sources" "$shortcut_desktop" mintinstall.desktop
+
+live_installer_casper_path="$PROJECT_ROOT/config/overlay/usr/share/initramfs-tools/scripts/casper-bottom/26live-installer"
+live_installer_autostart_path="$PROJECT_ROOT/config/overlay/usr/share/casper/live-installer-autostart.desktop"
+live_installer_helper_path="$PROJECT_ROOT/config/overlay/usr/libexec/live-installer-autostart"
+live_installer_casper=$(<"$live_installer_casper_path")
+live_installer_autostart=$(<"$live_installer_autostart_path")
+live_installer_helper=$(<"$live_installer_helper_path")
+
+if [[ "$(stat -c '%a' "$live_installer_casper_path")" == 755 &&
+    "$(stat -c '%a' "$live_installer_helper_path")" == 755 &&
+    "$(stat -c '%a' "$live_installer_autostart_path")" == 644 ]]; then
+    pass "Live installer runtime files have the required executable modes"
+else
+    fail "Live installer runtime files have the required executable modes"
+fi
+expect_success "Live installer occupies the first desktop slot and autostarts once" \
+    validate_live_installer_defaults "$live_installer_casper" \
+    "$live_installer_autostart" "$live_installer_helper"
+wrong_installer_position=${live_installer_casper/91,36/91,136}
+expect_failure "Live installer defaults reject a different desktop position" \
+    validate_live_installer_defaults "$wrong_installer_position" \
+    "$live_installer_autostart" "$live_installer_helper"
+missing_installer_monitor=$(sed '/metadata::monitor/d' <<<"$live_installer_casper")
+expect_failure "Live installer defaults require the primary monitor assignment" \
+    validate_live_installer_defaults "$missing_installer_monitor" \
+    "$live_installer_autostart" "$live_installer_helper"
+missing_live_guard=${live_installer_helper/boot=casper/boot=installed}
+expect_failure "Live installer defaults require a live-session guard" \
+    validate_live_installer_defaults "$live_installer_casper" \
+    "$live_installer_autostart" "$missing_live_guard"
+missing_launch_marker=${live_installer_helper/live-installer-autostarted/live-installer-always-start}
+expect_failure "Live installer defaults require a once-per-boot marker" \
+    validate_live_installer_defaults "$live_installer_casper" \
+    "$live_installer_autostart" "$missing_launch_marker"
+wrong_installer_launcher=${live_installer_helper/gtk-launch ubiquity.desktop/gtk-launch mintinstall.desktop}
+expect_failure "Live installer defaults reject a different application launcher" \
+    validate_live_installer_defaults "$live_installer_casper" \
+    "$live_installer_autostart" "$wrong_installer_launcher"
+missing_cinnamon_scope=${live_installer_autostart/OnlyShowIn=X-Cinnamon;/OnlyShowIn=GNOME;}
+expect_failure "Live installer autostart is restricted to Cinnamon" \
+    validate_live_installer_defaults "$live_installer_casper" \
+    "$missing_cinnamon_scope" "$live_installer_helper"
+wrong_installer_delay=${live_installer_autostart/X-GNOME-Autostart-Delay=5/X-GNOME-Autostart-Delay=15}
+expect_failure "Live installer autostart requires the five-second delay" \
+    validate_live_installer_defaults "$live_installer_casper" \
+    "$wrong_installer_delay" "$live_installer_helper"
+if [[ ! -e "$PROJECT_ROOT/config/overlay/etc/xdg/autostart/live-installer-autostart.desktop" ]] &&
+    ! rg -n '/etc/xdg/autostart/[^[:space:]]*live-installer' \
+        "$PROJECT_ROOT/config" >/dev/null; then
+    pass "Live installer autostart is not installed globally"
+else
+    fail "Live installer autostart is not installed globally"
+fi
 
 if ! rg -n '/org/cinnamon/desktop/interface/(gtk|cursor)-theme|/org/x/apps/portal/color-scheme' \
     "$PROJECT_ROOT/config" >/dev/null; then
