@@ -66,6 +66,19 @@ jobs:
       - name: Build and verify release ISO
         run: make release
 
+      - name: Upload verified release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vnmint-${{ steps.build-config.outputs.version }}-release-${{ github.run_number }}
+          path: |
+            dist/${{ steps.build-config.outputs.artifact_base }}.iso
+            dist/${{ steps.build-config.outputs.artifact_base }}.iso.sha256
+            dist/${{ steps.build-config.outputs.artifact_base }}.build-info.json
+            dist/build-release.log
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
       - name: Publish release to SourceForge
         shell: bash
         env:

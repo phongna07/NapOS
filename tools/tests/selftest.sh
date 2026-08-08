@@ -1175,21 +1175,21 @@ expect_failure "Live installer autostart requires the five-second delay" \
     validate_live_installer_defaults "$live_installer_casper" \
     "$wrong_installer_delay" "$live_installer_helper"
 if [[ ! -e "$PROJECT_ROOT/config/overlay/etc/xdg/autostart/live-installer-autostart.desktop" ]] &&
-    ! rg -n '/etc/xdg/autostart/[^[:space:]]*live-installer' \
+    ! grep -RInE '/etc/xdg/autostart/[^[:space:]]*live-installer' \
         "$PROJECT_ROOT/config" >/dev/null; then
     pass "Live installer autostart is not installed globally"
 else
     fail "Live installer autostart is not installed globally"
 fi
 
-if ! rg -n '/org/cinnamon/desktop/interface/(gtk|cursor)-theme|/org/x/apps/portal/color-scheme' \
+if ! grep -RInE '/org/cinnamon/desktop/interface/(gtk|cursor)-theme|/org/x/apps/portal/color-scheme' \
     "$PROJECT_ROOT/config" >/dev/null; then
     pass "Cinnamon theme defaults are not locked"
 else
     fail "Cinnamon theme defaults are not locked"
 fi
 
-if ! rg -n '/org/nemo/desktop/(computer-icon-visible|home-icon-visible|trash-icon-visible|volumes-visible)' \
+if ! grep -RInE '/org/nemo/desktop/(computer-icon-visible|home-icon-visible|trash-icon-visible|volumes-visible)' \
     "$PROJECT_ROOT/config" >/dev/null; then
     pass "Cinnamon desktop icon defaults are not locked"
 else
@@ -1339,7 +1339,7 @@ else
     fail "Verification enforces Linux Mint boot, installer, and Plymouth branding"
 fi
 
-if rg -n --fixed-strings '0.1.0' "$PROJECT_ROOT/tools/vnmint-build" >/dev/null; then
+if grep -Fnq -- '0.1.0' "$PROJECT_ROOT/tools/vnmint-build"; then
     fail "Build implementation avoids a hard-coded vnmint release version"
 else
     pass "Build implementation avoids a hard-coded vnmint release version"
@@ -1427,9 +1427,8 @@ if find "$PROJECT_ROOT" \
 else
     pass "Retired project identity is absent from current source paths"
 fi
-if rg -i -l "$retired_name" "$PROJECT_ROOT" --hidden \
-    --glob '!.git/**' --glob '!cache/**' --glob '!work/**' --glob '!dist/**' \
-    --glob '!public/*.png' >/dev/null; then
+if grep -RIil --exclude-dir=.git --exclude-dir=cache --exclude-dir=work \
+    --exclude-dir=dist --exclude='*.png' -- "$retired_name" "$PROJECT_ROOT" >/dev/null; then
     fail "Retired project identity is absent from current source text"
 else
     pass "Retired project identity is absent from current source text"
